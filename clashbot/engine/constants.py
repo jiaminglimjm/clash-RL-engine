@@ -16,7 +16,7 @@ MAX_ELIXIR_MILLI = 10000
 NORMAL_ELIXIR_TICKS = 84
 
 # Converts card movement stats into simulator movement. Card stats remain source values.
-TROOP_MOVEMENT_SPEED_FACTOR = 1.11
+TROOP_MOVEMENT_SPEED_FACTOR = 1.2
 
 SUDDEN_DEATH_START_SECONDS = 180
 MATCH_END_SECONDS = 300

@@ -25,6 +25,8 @@ class UnitSpec:
     radius: float
     projectile_speed_tiles_per_minute: float = 0.0
     splash_radius: float = 0.0
+    first_attack_ticks: Optional[int] = None
+    load_time_ticks: Optional[int] = None
     footprint_tiles: float = 0.0
     lifetime_ticks: Optional[int] = None
     mechanics: Tuple[str, ...] = ()
@@ -52,7 +54,7 @@ class CardSpec:
     units: Tuple[UnitSpec, ...] = ()
     formation: Tuple[Vec2, ...] = (Vec2(0.0, 0.0),)
     spell: Optional[SpellSpec] = None
-    source_note: str = "Retro Royale workbook, Level 11 public stats plus hidden/community-derived fields."
+    source_note: str = "Current Level 11 Fandom/Deckshop stats plus RoyaleAPI/Fandom hidden-stat fields."
 
 
 def _ticks(seconds: float) -> int:
@@ -83,6 +85,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 deploy_ticks=_ticks(1.0),
                 mass=6,
                 radius=0.5,
+                first_attack_ticks=_ticks(0.5),
+                load_time_ticks=_ticks(0.7),
             ),
         ),
     ),
@@ -110,6 +114,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 mass=3,
                 radius=0.5,
                 projectile_speed_tiles_per_minute=600,
+                first_attack_ticks=_ticks(0.5),
+                load_time_ticks=_ticks(0.4),
             ),
         ),
         formation=(Vec2(-0.45, 0.0), Vec2(0.45, 0.0)),
@@ -133,11 +139,13 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 speed_tiles_per_minute=90,
                 attack_range=2.5,
                 sight_range=5.5,
-                hit_speed_ticks=_ticks(1.0),
+                hit_speed_ticks=_ticks(1.2),
                 deploy_ticks=_ticks(1.0),
                 mass=2,
                 radius=0.5,
                 projectile_speed_tiles_per_minute=1000,
+                first_attack_ticks=_ticks(0.5),
+                load_time_ticks=_ticks(0.7),
             ),
         ),
         formation=(Vec2(0.0, -0.35), Vec2(-0.55, 0.45), Vec2(0.55, 0.45)),
@@ -155,7 +163,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
             crown_tower_damage=172,
             radius=2.5,
             projectile_speed_tiles_per_minute=600,
-            knockback_tiles=1.8,
+            knockback_tiles=1.0,
             mechanics=("traveling_spell", "area_damage", "knockback"),
         ),
     ),
@@ -181,9 +189,11 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 hit_speed_ticks=_ticks(1.0),
                 deploy_ticks=_ticks(1.0),
                 mass=0,
-                radius=1.5,
+                radius=0.6,
                 projectile_speed_tiles_per_minute=1000,
-                footprint_tiles=3.0,
+                first_attack_ticks=_ticks(1.0),
+                load_time_ticks=0,
+                footprint_tiles=2.4,
                 lifetime_ticks=_ticks(30.0),
                 mechanics=("lifetime",),
             ),
@@ -214,6 +224,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 radius=0.5,
                 projectile_speed_tiles_per_minute=600,
                 splash_radius=1.5,
+                first_attack_ticks=_ticks(0.4),
+                load_time_ticks=_ticks(1.0),
             ),
         ),
     ),
@@ -240,6 +252,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 deploy_ticks=_ticks(1.0),
                 mass=18,
                 radius=0.75,
+                first_attack_ticks=_ticks(0.5),
+                load_time_ticks=_ticks(1.0),
             ),
         ),
     ),
@@ -267,6 +281,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 mass=5,
                 radius=0.5,
                 projectile_speed_tiles_per_minute=1000,
+                first_attack_ticks=_ticks(0.7),
+                load_time_ticks=_ticks(0.3),
             ),
         ),
     ),
@@ -293,12 +309,15 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 deploy_ticks=_ticks(1.0),
                 mass=4,
                 radius=0.45,
+                first_attack_ticks=_ticks(0.5),
+                load_time_ticks=_ticks(1.1),
             ),
         ),
     ),
 }
 
 DEFAULT_DECK = (
+    "mini_pekka",
     "knight",
     "archers",
     "minions",
@@ -306,7 +325,7 @@ DEFAULT_DECK = (
     "cannon",
     "giant",
     "musketeer",
-    "mini_pekka",
+    
 )
 
 TOWER_SPECS: Dict[str, UnitSpec] = {
@@ -319,12 +338,12 @@ TOWER_SPECS: Dict[str, UnitSpec] = {
         hp=4824,
         damage=109,
         speed_tiles_per_minute=0,
-        attack_range=9.0,
-        sight_range=9.0,
+        attack_range=8.5,
+        sight_range=8.5,
         hit_speed_ticks=_ticks(1.0),
         deploy_ticks=0,
         mass=0,
-        radius=1.4,
+        radius=1.8,
         projectile_speed_tiles_per_minute=1000,
     ),
     "princess": UnitSpec(
@@ -341,7 +360,9 @@ TOWER_SPECS: Dict[str, UnitSpec] = {
         hit_speed_ticks=_ticks(0.8),
         deploy_ticks=0,
         mass=0,
-        radius=1.0,
-        projectile_speed_tiles_per_minute=1000,
+        radius=1.4,
+        projectile_speed_tiles_per_minute=600,
+        first_attack_ticks=_ticks(0.0),
+        load_time_ticks=_ticks(0.8),
     ),
 }

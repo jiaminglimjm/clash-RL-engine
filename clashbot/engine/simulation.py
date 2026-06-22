@@ -37,6 +37,11 @@ from .geometry import Vec2, tiles_per_minute_to_tiles_per_tick
 from .replay import CompactReplay, build_replay
 
 
+BUILDING_PLACEMENT_TILES = 3.0
+GROUND_SEGMENT_SAMPLE_TILES = 0.2
+BUILDING_AVOIDANCE_MARGIN = 0.15
+
+
 @dataclass(frozen=True)
 class GameOptions:
     simulated_network_latency_ticks: int = 0
@@ -172,13 +177,32 @@ class GameEngine:
 
     def can_place(self, side: str, card_id: str, pos: Vec2) -> bool:
         spec = CARD_SPECS[card_id]
+        if not self._placement_tile_allowed(side, spec.kind, pos):
+            return False
+        if spec.kind == "building":
+            return self._placement_area_allowed(side, spec.kind, pos, BUILDING_PLACEMENT_TILES)
+        return True
+
+    def _placement_tile_allowed(self, side: str, card_kind: str, pos: Vec2) -> bool:
         return placement_allowed(
             side,
-            spec.kind,
+            card_kind,
             pos,
             blue_princess_alive=self._princess_alive(SIDE_BLUE),
             red_princess_alive=self._princess_alive(SIDE_RED),
         )
+
+    def _placement_area_allowed(self, side: str, card_kind: str, pos: Vec2, size_tiles: float) -> bool:
+        half = size_tiles / 2.0
+        min_row = int(math.floor(pos.y - half + 1e-9))
+        max_row = int(math.ceil(pos.y + half - 1e-9)) - 1
+        min_col = int(math.floor(pos.x - half + 1e-9))
+        max_col = int(math.ceil(pos.x + half - 1e-9)) - 1
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                if not self._placement_tile_allowed(side, card_kind, Vec2(col + 0.5, row + 0.5)):
+                    return False
+        return True
 
     def state_hash(self) -> str:
         material = {
@@ -207,6 +231,7 @@ class GameEngine:
                     "y": round(entity.pos.y, 5),
                     "hp": entity.hp,
                     "target": entity.target_id,
+                    "windupTarget": entity.attack_windup_target_id,
                     "cooldown": entity.attack_cooldown_ticks,
                     "deploy": entity.deploy_ticks_remaining,
                     "life": entity.lifetime_ticks_remaining,
@@ -267,6 +292,12 @@ class GameEngine:
                     "kind": spec.kind,
                     "secondaryColor": spec.secondary_color,
                     "spellRadius": spec.spell.radius if spec.spell is not None else 0,
+                    "spellDamage": spec.spell.damage if spec.spell is not None else 0,
+                    "spellCrownTowerDamage": spec.spell.crown_tower_damage if spec.spell is not None else 0,
+                    "spellProjectileSpeed": (
+                        spec.spell.projectile_speed_tiles_per_minute if spec.spell is not None else 0
+                    ),
+                    "spellKnockbackTiles": spec.spell.knockback_tiles if spec.spell is not None else 0,
                     "formation": [{"x": point.x, "y": point.y} for point in spec.formation],
                     "units": [
                         {
@@ -274,6 +305,12 @@ class GameEngine:
                             "footprint": unit.footprint_tiles if unit.footprint_tiles > 0 else unit.radius * 2.0,
                             "kind": unit.kind,
                             "movementType": unit.movement_type,
+                            "hitSpeedTicks": unit.hit_speed_ticks,
+                            "firstAttackTicks": unit.first_attack_ticks,
+                            "loadTimeTicks": unit.load_time_ticks,
+                            "projectileSpeed": unit.projectile_speed_tiles_per_minute,
+                            "splashRadius": unit.splash_radius,
+                            "sightRange": unit.sight_range,
                         }
                         for unit in spec.units
                     ],
@@ -314,9 +351,16 @@ class GameEngine:
             "maxHp": entity.max_hp,
             "radius": entity.radius,
             "footprint": entity.footprint,
+            "hitSpeedTicks": entity.hit_speed_ticks,
+            "firstAttackTicks": entity.first_attack_ticks,
+            "loadTimeTicks": entity.load_time_ticks,
+            "projectileSpeed": entity.projectile_speed_tiles_per_minute,
+            "splashRadius": entity.splash_radius,
+            "sightRange": entity.sight_range,
             "secondaryColor": entity.secondary_color,
             "deployTicks": entity.deploy_ticks_remaining,
             "targetId": entity.target_id,
+            "attackWindupTargetId": entity.attack_windup_target_id,
             "towerRole": entity.tower_role,
             "facing": {"x": round(entity.facing_x, 4), "y": round(entity.facing_y, 4)},
             "lastHitTick": entity.last_hit_tick,
@@ -395,6 +439,8 @@ class GameEngine:
             secondary_color=secondary_color,
             projectile_speed_tiles_per_minute=spec.projectile_speed_tiles_per_minute,
             splash_radius=spec.splash_radius,
+            first_attack_ticks=spec.first_attack_ticks,
+            load_time_ticks=spec.load_time_ticks,
             footprint_tiles=spec.footprint_tiles,
             lifetime_ticks_remaining=spec.lifetime_ticks,
             lifetime_ticks_total=spec.lifetime_ticks,
@@ -569,32 +615,37 @@ class GameEngine:
 
     def _validate_or_acquire_target(self, entity: Entity) -> None:
         if entity.kind == "tower" and entity.tower_role == "king" and not self.king_activated[entity.side]:
-            entity.target_id = None
-            entity.target_locked = False
+            self._set_target(entity, None)
             return
         if entity.target_id is not None:
             target = self.entities.get(entity.target_id)
             if target is not None and target.alive and self._can_target(entity, target):
                 distance = entity.effective_distance_to(target)
                 if entity.target_locked and distance > max(entity.sight_range, entity.attack_range + 2.5):
-                    entity.target_id = None
-                    entity.target_locked = False
+                    self._set_target(entity, None)
                 elif target.is_building_like and not entity.target_locked:
                     challenger = self._best_target(entity)
                     if challenger is not None and challenger.entity_id != target.entity_id:
                         challenger_distance = entity.effective_distance_to(challenger)
                         if challenger_distance + 0.05 < distance:
-                            entity.target_id = challenger.entity_id
-                            entity.target_locked = False
+                            self._set_target(entity, challenger)
                     return
                 else:
                     return
             else:
-                entity.target_id = None
-                entity.target_locked = False
+                self._set_target(entity, None)
         target = self._best_target(entity)
-        entity.target_id = target.entity_id if target is not None else None
+        self._set_target(entity, target)
+
+    def _set_target(self, entity: Entity, target: Optional[Entity]) -> None:
+        target_id = target.entity_id if target is not None else None
+        if entity.target_id == target_id:
+            return
+        if entity.attack_windup_target_id is not None and not entity.target_locked:
+            entity.attack_cooldown_ticks = 0
+        entity.target_id = target_id
         entity.target_locked = False
+        entity.attack_windup_target_id = None
 
     def _best_target(self, entity: Entity) -> Optional[Entity]:
         best = None
@@ -632,6 +683,14 @@ class GameEngine:
     def _try_attack(self, attacker: Entity, target: Entity) -> None:
         if attacker.attack_cooldown_ticks > 0:
             return
+        if not attacker.target_locked and attacker.attack_windup_target_id != target.entity_id:
+            first_attack_ticks = attacker.first_attack_ticks or 0
+            if first_attack_ticks > 0:
+                attacker.attack_windup_target_id = target.entity_id
+                attacker.attack_cooldown_ticks = first_attack_ticks
+                self._face_toward(attacker, target.pos)
+                return
+            attacker.attack_windup_target_id = target.entity_id
         self._face_toward(attacker, target.pos)
         attacker.attack_cooldown_ticks = attacker.hit_speed_ticks
         attacker.target_locked = True
@@ -701,26 +760,23 @@ class GameEngine:
         if not crossing:
             return destination
 
+        if self._ground_segment_allowed(entity.pos, destination):
+            return destination
+
         bridge_x = self._bridge_lane_x(self._preferred_bridge_x(entity.pos, destination), entity.side)
         if self._behind_own_king(entity):
             return Vec2(bridge_x, entity.pos.y)
-        if entity.side == SIDE_BLUE:
-            if entity.pos.y > 16.6:
-                return Vec2(bridge_x, 16.5)
-            if entity.pos.y > 14.4:
-                return Vec2(bridge_x, 14.5)
-        else:
-            if entity.pos.y < 15.4:
-                return Vec2(bridge_x, 15.5)
-            if entity.pos.y < 17.6:
-                return Vec2(bridge_x, 17.5)
+        if current_below:
+            return Vec2(bridge_x, 16.5)
+        if current_above:
+            return Vec2(bridge_x, 15.5)
         return destination
 
     def _nearest_bridge_x(self, x: float) -> float:
         return 3.5 if abs(x - 3.5) <= abs(x - 14.5) else 14.5
 
     def _bridge_lane_x(self, bridge_x: float, side: str) -> float:
-        return bridge_x + (0.35 if side == SIDE_BLUE else -0.35)
+        return bridge_x
 
     def _preferred_bridge_x(self, start: Vec2, destination: Vec2) -> float:
         reference_x = destination.x
@@ -739,6 +795,21 @@ class GameEngine:
         if kind != RIVER:
             return True
         return is_bridge_world(pos)
+
+    def _ground_segment_allowed(self, start: Vec2, end: Vec2) -> bool:
+        distance = start.distance_to(end)
+        if distance <= 1e-9:
+            return self._ground_position_allowed(end)
+        samples = max(1, int(math.ceil(distance / GROUND_SEGMENT_SAMPLE_TILES)))
+        for index in range(1, samples + 1):
+            progress = index / samples
+            point = Vec2(
+                start.x + (end.x - start.x) * progress,
+                start.y + (end.y - start.y) * progress,
+            )
+            if not self._ground_position_allowed(point):
+                return False
+        return True
 
     def _on_bridge_corridor(self, entity: Entity) -> bool:
         return is_bridge_world(entity.pos)
@@ -759,7 +830,7 @@ class GameEngine:
             away = Vec2(-move_dir.y, move_dir.x)
         tangent_a = Vec2(-away.y, away.x)
         tangent_b = Vec2(away.y, -away.x)
-        clearance = obstacle.radius + entity.radius + 0.55
+        clearance = obstacle.radius + entity.radius + BUILDING_AVOIDANCE_MARGIN
         base = obstacle.pos.add(away.x * clearance, away.y * clearance)
         candidates = [
             base.add(tangent_a.x * clearance, tangent_a.y * clearance),
@@ -779,6 +850,8 @@ class GameEngine:
             if obstacle.entity_id == entity.entity_id or not obstacle.alive or not obstacle.is_building_like:
                 continue
             if obstacle.entity_id == ignored_target_id:
+                continue
+            if obstacle.pos.distance_to(destination) <= 1e-6:
                 continue
             inflated = obstacle.radius + entity.radius + 0.2
             progress, distance = self._segment_projection(entity.pos, destination, obstacle.pos)

@@ -38,12 +38,15 @@ class Entity:
     secondary_color: str
     projectile_speed_tiles_per_minute: float = 0.0
     splash_radius: float = 0.0
+    first_attack_ticks: Optional[int] = None
+    load_time_ticks: Optional[int] = None
     footprint_tiles: float = 0.0
     lifetime_ticks_remaining: Optional[int] = None
     lifetime_ticks_total: Optional[int] = None
     lifetime_decay_remainder: int = 0
     target_id: Optional[int] = None
     target_locked: bool = False
+    attack_windup_target_id: Optional[int] = None
     attack_cooldown_ticks: int = 0
     created_tick: int = 0
     tower_role: Optional[str] = None
