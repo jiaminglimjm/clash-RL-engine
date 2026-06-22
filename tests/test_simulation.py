@@ -1,8 +1,16 @@
 import unittest
 
-from clashbot.engine.constants import MATCH_END_TICKS, SIDE_BLUE, SIDE_RED, SUDDEN_DEATH_START_TICKS
+from clashbot.engine.constants import (
+    MATCH_END_TICKS,
+    SIDE_BLUE,
+    SIDE_RED,
+    SUDDEN_DEATH_START_TICKS,
+    TICKS_PER_SECOND,
+    TROOP_MOVEMENT_SPEED_FACTOR,
+)
 from clashbot.engine.cards import CARD_SPECS
 from clashbot.engine.geometry import Vec2
+from clashbot.engine.geometry import tiles_per_minute_to_tiles_per_tick
 from clashbot.engine.replay import CompactReplay
 from clashbot.engine.simulation import GameEngine, GameOptions
 
@@ -71,6 +79,19 @@ class SimulationTests(unittest.TestCase):
         knight = next(entity for entity in engine.entities.values() if entity.card_id == "knight")
         self.assertGreater(knight.pos.x, 9.5)
         self.assertLess(knight.pos.y, 24.5)
+
+    def test_troop_movement_uses_global_speed_factor(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["knight"], Vec2(9.5, 24.5))
+        knight = next(entity for entity in engine.entities.values() if entity.card_id == "knight")
+        knight.deploy_ticks_remaining = 0
+        old_pos = knight.pos
+        engine._move_entity(knight, None)
+        expected = (
+            tiles_per_minute_to_tiles_per_tick(knight.speed_tiles_per_minute, TICKS_PER_SECOND)
+            * TROOP_MOVEMENT_SPEED_FACTOR
+        )
+        self.assertAlmostEqual(old_pos.distance_to(knight.pos), expected)
 
     def test_air_units_resolve_collision_with_each_other(self):
         engine = self.make_engine()

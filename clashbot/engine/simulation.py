@@ -30,6 +30,7 @@ from .constants import (
     SIDE_RED,
     SIDES,
     TICKS_PER_SECOND,
+    TROOP_MOVEMENT_SPEED_FACTOR,
 )
 from .entities import Entity, PlayerState, Projectile, ScheduledCommand, players_snapshot
 from .geometry import Vec2, tiles_per_minute_to_tiles_per_tick
@@ -661,7 +662,10 @@ class GameEngine:
             destination = self._ground_steering_destination(entity, destination)
             if not self._near_bridge(entity):
                 destination = self._avoid_blocking_buildings(entity, destination, target)
-        step_distance = tiles_per_minute_to_tiles_per_tick(entity.speed_tiles_per_minute, TICKS_PER_SECOND)
+        step_distance = (
+            tiles_per_minute_to_tiles_per_tick(entity.speed_tiles_per_minute, TICKS_PER_SECOND)
+            * TROOP_MOVEMENT_SPEED_FACTOR
+        )
         new_pos = entity.pos.moved_toward(destination, step_distance)
         if entity.movement_type == "ground" and not self._ground_position_allowed(new_pos):
             bridge_x = self._bridge_lane_x(self._preferred_bridge_x(entity.pos, destination), entity.side)
