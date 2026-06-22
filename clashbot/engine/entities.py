@@ -124,8 +124,12 @@ class PlayerState:
         self.elixir_milli -= elixir * ELIXIR_MILLI
 
     def cycle_slot(self, hand_slot: int) -> None:
-        deck_index = self.order.pop(hand_slot)
-        self.order.append(deck_index)
+        played_index = self.order[hand_slot]
+        if len(self.order) <= 4:
+            return
+        replacement_index = self.order.pop(4)
+        self.order[hand_slot] = replacement_index
+        self.order.append(played_index)
 
     def regen_tick(self, multiplier: int = 1) -> None:
         if self.elixir_milli >= MAX_ELIXIR_MILLI:

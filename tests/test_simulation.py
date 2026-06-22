@@ -1,6 +1,6 @@
 import unittest
 
-from clashbot.engine.constants import SIDE_BLUE, SIDE_RED
+from clashbot.engine.constants import MATCH_END_TICKS, SIDE_BLUE, SIDE_RED, SUDDEN_DEATH_START_TICKS
 from clashbot.engine.cards import CARD_SPECS
 from clashbot.engine.geometry import Vec2
 from clashbot.engine.replay import CompactReplay
@@ -16,7 +16,7 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(engine.players[SIDE_BLUE].hand(), ["knight", "archers", "minions", "fireball"])
         engine.submit_play(SIDE_BLUE, 0, 9.0, 24.0)
         engine.step()
-        self.assertEqual(engine.players[SIDE_BLUE].hand(), ["archers", "minions", "fireball", "cannon"])
+        self.assertEqual(engine.players[SIDE_BLUE].hand(), ["cannon", "archers", "minions", "fireball"])
         self.assertLess(engine.players[SIDE_BLUE].elixir_milli, 5000)
         self.assertTrue(any(entity.card_id == "knight" for entity in engine.entities.values()))
 
@@ -72,6 +72,20 @@ class SimulationTests(unittest.TestCase):
         self.assertGreater(knight.pos.x, 9.5)
         self.assertLess(knight.pos.y, 24.5)
 
+    def test_air_units_resolve_collision_with_each_other(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["minions"], Vec2(9.5, 24.5))
+        minions = [entity for entity in engine.entities.values() if entity.card_id == "minions"]
+        for minion in minions:
+            minion.pos = Vec2(9.5, 24.5)
+        engine._resolve_collisions()
+        distances = [
+            left.pos.distance_to(right.pos)
+            for index, left in enumerate(minions)
+            for right in minions[index + 1 :]
+        ]
+        self.assertTrue(any(distance > 0 for distance in distances))
+
     def test_unlocked_tower_target_can_be_pulled_by_nearer_troop(self):
         engine = self.make_engine()
         engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["knight"], Vec2(3.5, 10.0))
@@ -114,7 +128,47 @@ class SimulationTests(unittest.TestCase):
 
         engine._damage_entity(SIDE_BLUE, red_king, 1)
         engine.step()
+        self.assertIsNone(red_king.target_id)
+        engine.step(120)
         self.assertEqual(red_king.target_id, giant.entity_id)
+
+    def test_double_elixir_starts_at_sudden_death(self):
+        engine = self.make_engine()
+        blue = engine.players[SIDE_BLUE]
+        blue.elixir_milli = 0
+        engine.tick = SUDDEN_DEATH_START_TICKS - 1
+        engine.step()
+        before = blue.elixir_milli
+        engine.step()
+        self.assertGreater(blue.elixir_milli - before, before)
+
+    def test_sudden_death_any_tower_destroyed_wins(self):
+        engine = self.make_engine()
+        engine.tick = SUDDEN_DEATH_START_TICKS
+        tower = engine._tower_entity(SIDE_RED, "left_princess")
+        engine._damage_entity(SIDE_BLUE, tower, tower.hp)
+        engine._cleanup_dead()
+        self.assertTrue(engine.game_over)
+        self.assertEqual(engine.winner, SIDE_BLUE)
+        self.assertEqual(engine.end_reason, "tower destroyed")
+
+    def test_tiebreaker_lowest_tower_hp_loses(self):
+        engine = self.make_engine()
+        red_tower = engine._tower_entity(SIDE_RED, "left_princess")
+        red_tower.hp = 100
+        engine.tick = MATCH_END_TICKS - 1
+        engine.step()
+        self.assertTrue(engine.game_over)
+        self.assertEqual(engine.winner, SIDE_BLUE)
+        self.assertEqual(engine.end_reason, "tiebreaker")
+
+    def test_tiebreaker_draw_when_lowest_tower_hp_equal(self):
+        engine = self.make_engine()
+        engine.tick = MATCH_END_TICKS - 1
+        engine.step()
+        self.assertTrue(engine.game_over)
+        self.assertIsNone(engine.winner)
+        self.assertEqual(engine.end_reason, "tiebreaker draw")
 
     def test_king_tower_death_ends_game_and_removes_all_side_towers(self):
         engine = self.make_engine()

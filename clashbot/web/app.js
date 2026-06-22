@@ -256,8 +256,9 @@ function drawEntity(entity) {
   ctx.lineWidth = 3;
   ctx.strokeStyle = "rgba(255,255,255,0.88)";
   ctx.fillStyle = "#102010";
-  ctx.strokeText(entity.label, p.x, p.y + radius + 10);
-  ctx.fillText(entity.label, p.x, p.y + radius + 10);
+  const label = entity.kind === "tower" ? String(entity.hp) : entity.label;
+  ctx.strokeText(label, p.x, p.y + radius + 10);
+  ctx.fillText(label, p.x, p.y + radius + 10);
 }
 
 function drawFacingArrow(entity, p, radius) {
@@ -293,9 +294,11 @@ function renderPanel() {
   redElixirEl.textContent = `Red ${state.players.red.elixir.toFixed(1)}`;
   netlineEl.textContent = `lat ${state.net.simulatedLatencyTicks}  place ${state.net.placementDelayTicks}  sync ${state.net.lockstepDelayTicks}`;
   if (state.game && state.game.over) {
-    statusEl.textContent = `${capitalize(state.game.winner)} wins`;
+    statusEl.textContent = state.game.winner ? `${capitalize(state.game.winner)} wins` : "Draw";
+  } else if (state.game && state.game.phase === "sudden_death") {
+    statusEl.textContent = `Sudden death  ${state.game.elixirMultiplier}x`;
   } else {
-    statusEl.textContent = `Live`;
+    statusEl.textContent = `Live  ${state.game ? state.game.elixirMultiplier : 1}x`;
   }
 
   const selectedKey = selected ? `${selected.side}:${selected.slot}` : "none";

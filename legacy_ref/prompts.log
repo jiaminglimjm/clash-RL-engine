@@ -43,15 +43,21 @@ some things to fix:
 2. for the king tower: "Activation takes 4 seconds to complete - it takes 3.3 seconds for the King Tower's cannon to aim at an enemy target, and another 0.7 seconds before it shoots its first cannonball."
 3. when i place a card, the new card should take place of the just played card. not shift all cards up.
 4. pathfinding is still fishy. they jitter diagonally. and sometimes get stuck on the bridge.
+5. show the towers' health numerically. dont show the names of the towers.
+6. the minions dont seem to respect each other's collision box
 
 
 
-
-
-
-
-
-
+1.
+naked at bridge for princess tower from 3052.
+minions: 2517
+knight: 1638 (7 hits)
+archers: 2604
+mini pekka: 32 (4 hits)
+wizard: 2209 (3 hits)
+giant: 0hp + 1 hit to king tower.
+musketeer: 1967 (5 hits)
+fireball: 2880
 
 
 

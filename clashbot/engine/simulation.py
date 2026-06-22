@@ -23,6 +23,9 @@ from .constants import (
     ARENA_COLS,
     ARENA_ROWS,
     ENGINE_VERSION,
+    KING_ACTIVATION_DELAY_TICKS,
+    MATCH_END_TICKS,
+    SUDDEN_DEATH_START_TICKS,
     SIDE_BLUE,
     SIDE_RED,
     SIDES,
@@ -65,9 +68,11 @@ class GameEngine:
         self.accepted_commands: List[ScheduledCommand] = []
         self.event_log: List[str] = []
         self.king_activated: Dict[str, bool] = {SIDE_BLUE: False, SIDE_RED: False}
+        self.king_activation_started_tick: Dict[str, Optional[int]] = {SIDE_BLUE: None, SIDE_RED: None}
         self.game_over = False
         self.winner: Optional[str] = None
         self.ended_tick: Optional[int] = None
+        self.end_reason: Optional[str] = None
         self._spawn_initial_towers()
 
     @classmethod
@@ -155,12 +160,14 @@ class GameEngine:
         self._apply_due_commands()
         self._regen_elixir()
         self._update_timers()
+        self._update_king_activation()
         self._update_projectiles()
         self._cleanup_dead()
         self._update_entities()
         self._resolve_collisions()
         self._cleanup_dead()
         self.tick += 1
+        self._check_match_clock()
 
     def can_place(self, side: str, card_id: str, pos: Vec2) -> bool:
         spec = CARD_SPECS[card_id]
@@ -179,6 +186,7 @@ class GameEngine:
                 "over": self.game_over,
                 "winner": self.winner,
                 "kingActivated": dict(self.king_activated),
+                "kingActivationStartedTick": dict(self.king_activation_started_tick),
             },
             "players": {
                 side: {
@@ -280,7 +288,13 @@ class GameEngine:
                 "over": self.game_over,
                 "winner": self.winner,
                 "endedTick": self.ended_tick,
+                "endReason": self.end_reason,
                 "kingActivated": dict(self.king_activated),
+                "kingActivationStartedTick": dict(self.king_activation_started_tick),
+                "phase": self._phase_name(),
+                "suddenDeathTick": SUDDEN_DEATH_START_TICKS,
+                "matchEndTick": MATCH_END_TICKS,
+                "elixirMultiplier": self._current_elixir_multiplier(),
             },
         }
 
@@ -493,7 +507,24 @@ class GameEngine:
 
     def _regen_elixir(self) -> None:
         for player in self.players.values():
-            player.regen_tick(self.options.elixir_regen_multiplier)
+            player.regen_tick(self._current_elixir_multiplier())
+
+    def _current_elixir_multiplier(self) -> int:
+        multiplier = self.options.elixir_regen_multiplier
+        if self.tick >= SUDDEN_DEATH_START_TICKS:
+            multiplier *= 2
+        return multiplier
+
+    def _phase_name(self) -> str:
+        if self.game_over:
+            return "ended"
+        if self.tick >= SUDDEN_DEATH_START_TICKS:
+            return "sudden_death"
+        return "regulation"
+
+    def _check_match_clock(self) -> None:
+        if not self.game_over and self.tick >= MATCH_END_TICKS:
+            self._end_by_tiebreaker()
 
     def _update_timers(self) -> None:
         for entity in self.entities.values():
@@ -512,6 +543,17 @@ class GameEngine:
                         entity.hp = max(0, entity.hp - decay)
                 if entity.lifetime_ticks_remaining <= 0:
                     entity.hp = 0
+
+    def _update_king_activation(self) -> None:
+        for side, started_tick in list(self.king_activation_started_tick.items()):
+            if started_tick is None or self.king_activated[side]:
+                continue
+            if self.tick - started_tick >= KING_ACTIVATION_DELAY_TICKS:
+                self.king_activated[side] = True
+                king = self._king_entity(side)
+                if king is not None:
+                    king.attack_cooldown_ticks = 0
+                self._log("%s king tower activated" % side)
 
     def _update_entities(self) -> None:
         for entity in self._entities_sorted():
@@ -617,7 +659,8 @@ class GameEngine:
             return
         if entity.movement_type == "ground":
             destination = self._ground_steering_destination(entity, destination)
-            destination = self._avoid_blocking_buildings(entity, destination, target)
+            if not self._near_bridge(entity):
+                destination = self._avoid_blocking_buildings(entity, destination, target)
         step_distance = tiles_per_minute_to_tiles_per_tick(entity.speed_tiles_per_minute, TICKS_PER_SECOND)
         new_pos = entity.pos.moved_toward(destination, step_distance)
         if entity.movement_type == "ground" and not self._ground_position_allowed(new_pos):
@@ -647,9 +690,9 @@ class GameEngine:
 
     def _ground_steering_destination(self, entity: Entity, destination: Vec2) -> Vec2:
         current_above = entity.pos.y < 15.0
-        current_below = entity.pos.y > 16.0
+        current_below = entity.pos.y > 17.0
         dest_above = destination.y < 15.0
-        dest_below = destination.y > 16.0
+        dest_below = destination.y > 17.0
         crossing = (current_below and dest_above) or (current_above and dest_below)
         if not crossing:
             return destination
@@ -657,10 +700,16 @@ class GameEngine:
         bridge_x = self._bridge_lane_x(self._preferred_bridge_x(entity.pos, destination), entity.side)
         if self._behind_own_king(entity):
             return Vec2(bridge_x, entity.pos.y)
-        if current_below:
-            return Vec2(bridge_x, 15.5)
-        if current_above:
-            return Vec2(bridge_x, 16.5)
+        if entity.side == SIDE_BLUE:
+            if entity.pos.y > 16.6:
+                return Vec2(bridge_x, 16.5)
+            if entity.pos.y > 14.4:
+                return Vec2(bridge_x, 14.5)
+        else:
+            if entity.pos.y < 15.4:
+                return Vec2(bridge_x, 15.5)
+            if entity.pos.y < 17.6:
+                return Vec2(bridge_x, 17.5)
         return destination
 
     def _nearest_bridge_x(self, x: float) -> float:
@@ -689,6 +738,11 @@ class GameEngine:
 
     def _on_bridge_corridor(self, entity: Entity) -> bool:
         return is_bridge_world(entity.pos)
+
+    def _near_bridge(self, entity: Entity) -> bool:
+        return 14.0 <= entity.pos.y <= 18.0 and (
+            abs(entity.pos.x - 3.5) <= 2.2 or abs(entity.pos.x - 14.5) <= 2.2
+        )
 
     def _avoid_blocking_buildings(self, entity: Entity, destination: Vec2, target: Optional[Entity]) -> Vec2:
         obstacle = self._first_blocking_building(entity, destination, target)
@@ -788,7 +842,7 @@ class GameEngine:
         if amount <= 0 or not target.alive:
             return
         if target.kind == "tower" and target.tower_role == "king":
-            self.king_activated[target.side] = True
+            self._trigger_king_activation(target.side)
         target.hp = max(0, target.hp - int(amount))
         if splash_radius > 0:
             for entity in self._entities_sorted():
@@ -807,9 +861,11 @@ class GameEngine:
         entity.pos = new_pos.clamp(entity.radius, entity.radius, ARENA_COLS - entity.radius, ARENA_ROWS - entity.radius)
 
     def _resolve_collisions(self) -> None:
-        units = [entity for entity in self._entities_sorted() if entity.alive and not entity.is_air]
+        units = [entity for entity in self._entities_sorted() if entity.alive]
         for index, left in enumerate(units):
             for right in units[index + 1 :]:
+                if left.is_air != right.is_air:
+                    continue
                 overlap = left.radius + right.radius - left.pos.distance_to(right.pos)
                 if overlap <= 0:
                     continue
@@ -838,6 +894,24 @@ class GameEngine:
                     right.pos = right.pos.add(nx * correction * fraction, ny * correction * fraction)
                 left.pos = left.pos.clamp(left.radius, left.radius, ARENA_COLS - left.radius, ARENA_ROWS - left.radius)
                 right.pos = right.pos.clamp(right.radius, right.radius, ARENA_COLS - right.radius, ARENA_ROWS - right.radius)
+                if left.movement_type == "ground":
+                    left.pos = self._repair_ground_position(left)
+                if right.movement_type == "ground":
+                    right.pos = self._repair_ground_position(right)
+
+    def _repair_ground_position(self, entity: Entity) -> Vec2:
+        if self._ground_position_allowed(entity.pos):
+            return entity.pos
+        row, _ = tile_for_world(entity.pos)
+        bridge_x = self._bridge_lane_x(self._nearest_bridge_x(entity.pos.x), entity.side)
+        if row in (15, 16):
+            return Vec2(bridge_x, entity.pos.y).clamp(
+                entity.radius, entity.radius, ARENA_COLS - entity.radius, ARENA_ROWS - entity.radius
+            )
+        repaired_y = 14.95 if entity.pos.y < 16.0 else 17.05
+        return Vec2(entity.pos.x, repaired_y).clamp(
+            entity.radius, entity.radius, ARENA_COLS - entity.radius, ARENA_ROWS - entity.radius
+        )
 
     def _bridge_passing_pair(self, left: Entity, right: Entity) -> bool:
         if left.side == right.side:
@@ -856,28 +930,66 @@ class GameEngine:
             entity = self.entities.pop(entity_id)
             if entity.kind == "tower":
                 self._log("%s %s destroyed" % (entity.side, entity.tower_role))
-                if entity.tower_role == "king":
-                    self._end_game(entity.side)
+                if entity.tower_role == "king" or self.tick >= SUDDEN_DEATH_START_TICKS:
+                    self._end_game(defeated_side=entity.side, reason="tower destroyed")
                 elif entity.tower_role in ("left_princess", "right_princess"):
-                    self.king_activated[entity.side] = True
+                    self._trigger_king_activation(entity.side)
             for other in self.entities.values():
                 if other.target_id == entity_id:
                     other.target_id = None
 
-    def _end_game(self, defeated_side: str) -> None:
+    def _trigger_king_activation(self, side: str) -> None:
+        if self.king_activated[side] or self.king_activation_started_tick[side] is not None:
+            return
+        self.king_activation_started_tick[side] = self.tick
+        self._log("%s king tower activation started" % side)
+
+    def _end_game(
+        self,
+        defeated_side: Optional[str] = None,
+        winner: Optional[str] = None,
+        reason: str = "game over",
+    ) -> None:
         if self.game_over:
             return
         self.game_over = True
-        self.winner = SIDE_RED if defeated_side == SIDE_BLUE else SIDE_BLUE
+        if winner is not None:
+            self.winner = winner
+        elif defeated_side is not None:
+            self.winner = SIDE_RED if defeated_side == SIDE_BLUE else SIDE_BLUE
+        else:
+            self.winner = None
         self.ended_tick = self.tick
-        for entity in list(self.entities.values()):
-            if entity.side == defeated_side and entity.kind == "tower":
-                self.entities.pop(entity.entity_id, None)
-                for other in self.entities.values():
-                    if other.target_id == entity.entity_id:
-                        other.target_id = None
+        self.end_reason = reason
+        if defeated_side is not None:
+            for entity in list(self.entities.values()):
+                if entity.side == defeated_side and entity.kind == "tower":
+                    self.entities.pop(entity.entity_id, None)
+                    for other in self.entities.values():
+                        if other.target_id == entity.entity_id:
+                            other.target_id = None
         self.pending_commands.clear()
-        self._log("%s wins by king tower destruction" % self.winner)
+        if self.winner is None:
+            self._log("match ends in a draw by %s" % reason)
+        else:
+            self._log("%s wins by %s" % (self.winner, reason))
+
+    def _end_by_tiebreaker(self) -> None:
+        blue_low = min(self._tower_healths(SIDE_BLUE))
+        red_low = min(self._tower_healths(SIDE_RED))
+        if blue_low == red_low:
+            self._end_game(winner=None, reason="tiebreaker draw")
+        elif blue_low < red_low:
+            self._end_game(defeated_side=SIDE_BLUE, reason="tiebreaker")
+        else:
+            self._end_game(defeated_side=SIDE_RED, reason="tiebreaker")
+
+    def _tower_healths(self, side: str) -> List[int]:
+        values = []
+        for role in ("king", "left_princess", "right_princess"):
+            tower = self._tower_entity(side, role)
+            values.append(tower.hp if tower is not None else 0)
+        return values
 
     def _princess_alive(self, side: str) -> Tuple[bool, bool]:
         return (
