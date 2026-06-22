@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ClashBot Debug Arena</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="arena-pane">
+        <canvas id="arena" width="720" height="960" aria-label="Arena"></canvas>
+      </section>
+      <aside class="panel">
+        <div class="topbar">
+          <div class="status" id="status">Live</div>
+          <div class="clock" id="clock">t=0</div>
+        </div>
+        <div class="controls">
+          <button id="pauseBtn">Pause</button>
+          <button id="stepBtn">Step</button>
+          <button id="resetBtn">Reset</button>
+        </div>
+        <div class="statline">
+          <span id="blueElixir">Blue 0.0</span>
+          <span id="redElixir">Red 0.0</span>
+        </div>
+        <div class="hands" id="hands">
+          <div class="hand-column">
+            <div class="hand-title blue-title">Blue</div>
+            <div class="hand" id="blueHand"></div>
+          </div>
+          <div class="hand-column">
+            <div class="hand-title red-title">Red</div>
+            <div class="hand" id="redHand"></div>
+          </div>
+        </div>
+        <div class="netline" id="netline"></div>
+        <div class="log" id="log"></div>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

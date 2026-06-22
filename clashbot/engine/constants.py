@@ -1,0 +1,17 @@
+ENGINE_VERSION = "cr-sim-prototype-0.1.0"
+
+TICKS_PER_SECOND = 30
+ARENA_ROWS = 32
+ARENA_COLS = 18
+
+SIDE_BLUE = "blue"
+SIDE_RED = "red"
+SIDES = (SIDE_BLUE, SIDE_RED)
+
+ELIXIR_MILLI = 1000
+START_ELIXIR_MILLI = 5000
+MAX_ELIXIR_MILLI = 10000
+
+# Legacy Retro Royale engine: normal elixir is 1.0 every 84 ticks at 30 FPS.
+NORMAL_ELIXIR_TICKS = 84
+

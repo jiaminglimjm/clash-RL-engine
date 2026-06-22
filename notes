@@ -1,0 +1,19 @@
+19/6/2026
+really good first prototype. its bug fixing capabilities is awesome too.
+
+i think melee cards or short range troops should blink colours whenever it hits.
+
+placing two giants at the bridge makes them get blocked, but they do slowly eventually walk past each other. should be faster though, im scared other cards may get stuck on the bridge too. idk how to be deterministic while solving so many of these bugs too.
+
+i wonder if cannon is correct size.
+
+bug fixes:
+1. cannon should pull giant, troops should retarget to other troops/buildings rather than zoom in to tower.
+2. cannon size
+3. blocking on bridge.
+4. show tower health figures
+
+todo:
+1. validate speeds and damages
+2. validate troop retargeting and king activation
+3. should i randomize the layer above the engine for the RL agents? or make several sims. idk.. idk how to ensure replay data is reliable after fixing bugs. i dont want to collect data and next day is useless.

@@ -1,0 +1,492 @@
+Yes. At a high level, this engine is a **continuous-coordinate Clash Royale simulator** drawn on a tile grid. It does **not** use true A* pathfinding. It uses hard-coded lane/bridge steering, target acquisition, collision pushing, cooldowns, projectiles, and special tags attached to troop/card data.
+
+## 1. Core world model
+
+The whole game is built around arrays. A card contains a name, description, elixir cost, and one or more troop/spell templates. A troop template follows this schema:
+
+`[name, health, maxHealth, damage, x, y, size, mass, speed, range, sightRange, cooldown, maxCooldown, retargetPenalty, target, locked, angle, aoe, type, targetType, penalty, loadTime, deployTime, effects, specials]`
+
+The source comments explicitly define this structure, and the active troop lists use the same format for towers and spawned units.
+
+One confusing detail: the code labels coordinates as `x, y`, but mechanically they behave more like **row, column**:
+
+* `data[4]` is the vertical arena position.
+* `data[5]` is the horizontal lane position.
+* Drawing converts them to pixels with `ellipse(tg(data[5]), tg(data[4]), ...)`, so `data[5]` becomes screen x and `data[4]` becomes screen y.
+
+## 2. Arena layout
+
+The arena is basically a **32 by 18 tile grid**, rendered inside the 600×600 canvas. Tiles are 15 pixels each, starting around pixel `(60, 60)`. The world coordinate system therefore runs roughly:
+
+* Rows: `0` to `32`
+* Columns: `0` to `18`
+* River/midline: around rows `15` and `16`
+* Left bridge: around column `3`
+* Right bridge: around column `14`
+
+The initial towers define the actual battlefield geometry. Blue starts at the bottom: king tower at `(29, 9)`, princess towers at `(25.5, 3.5)` and `(25.5, 14.5)`. Red starts at the top: king tower at `(3, 9)`, princess towers at `(6.5, 3.5)` and `(6.5, 14.5)`.
+
+The `getTileInfo(i, j)` function classifies each tile as:
+
+* `normal`
+* `river`
+* `banned`
+* `princess`
+* `crown`
+
+It computes distance from the centerline using:
+
+```js
+trueI = abs(15.5 - i) - 0.5;
+trueJ = abs(8.5 - j) - 0.5;
+```
+
+That means the arena is mirrored around the river and around the horizontal center. The river occupies the middle rows, except where bridge columns are allowed. The function begins by calculating these center distances before applying tile-type rules.
+
+## 3. Placement rules
+
+Placement is mostly tile-type based. A card is normally placeable only if the hovered tile is **not**:
+
+* river
+* banned
+* princess-tower zone
+* crown-tower zone
+
+The code does this by calling `getTileOver()` and `getTileInfo()`, then setting `placeable` based on the returned tile type.
+
+For Blue, there is a deployment boundary: if the tile row is too far into Red’s side, placement is blocked. The code specifically blocks Blue placement when `tileHover[0] < 11`, unless special rules apply. It also lets Blue place on a destroyed own princess-tower tile if that princess tower has become `"null"`.
+
+Spells override most placement restrictions. If the selected card is marked as `"spell"`, it can be placed anywhere except banned tiles. Recruits have their own special placement rules because they deploy as a line, so the code blocks certain lanes and river-adjacent positions for them.
+
+There is also Clash-like “territory unlock” logic: if an enemy princess tower is alive, you cannot place deep in that lane. If that tower dies, more of that lane becomes available for placement. The code checks whether `rTroops[1]` or `rTroops[2]` is `"null"` to decide whether Blue can place deeper on the left or right side.
+
+## 4. Pathfinding model
+
+The engine does **not** use grid search, navmeshes, or A*. It uses steering logic.
+
+The pathfinding has two major modes:
+
+1. **No target:** move along lane/bridge defaults.
+2. **Has target:** try to move toward the target, unless the river blocks the path.
+
+When a unit has a target, the code calculates the difference between the troop and its target:
+
+```js
+xdif = edata[4] - data[4];
+ydif = edata[5] - data[5];
+cdis = sqrt(xdif*xdif + ydif*ydif);
+```
+
+Then it calculates a `measure` value to decide whether a direct line toward the target is allowed or whether the troop needs to route through a bridge.
+
+The bridge logic is hard-coded. If a ground unit is on one side of the river and cannot directly approach its target, it steers toward bridge-adjacent coordinates. The important bridge column thresholds are around:
+
+* `2.9`
+* `4.1`
+* `13.9`
+* `15.1`
+
+Those numbers form the left and right bridge corridors. If the troop is above/below the bridge corridor, it is redirected toward one of those bridge openings instead of walking straight across the river.
+
+Air units, hovering units, jumpers, or units with forced direct targeting can ignore this bridge routing. The code checks:
+
+```js
+data[18] === "air" || data[18] === "hovering" || jump || measure || targetDa !== -1
+```
+
+If any of those are true, the unit moves directly toward its target. Otherwise, ground units use bridge steering.
+
+So the pathfinding is best described as:
+
+> “Continuous movement with hard-coded river avoidance and bridge waypoints.”
+
+## 5. Movement and collision
+
+Movement is frame-based. Each frame, a unit moves by roughly:
+
+```js
+movementMultiplier * speed / spdm
+```
+
+where `spdm` is a global speed divisor. Slows, rage, snare, stun, deploy delay, and knockback all modify whether or how much a troop moves.
+
+Collision is handled separately from pathfinding. The engine has circle/rectangle helper functions like `circleToRect()` and `angCircRect()` for collision-style geometry.
+
+Troops have:
+
+* `size`, used as diameter
+* `mass`, used to decide how much they push each other
+* `type`, used to decide collision/targeting class
+
+Buildings have speed `0` and mass `0`, so they effectively behave as fixed obstacles. Troops push around each other by overlap correction rather than by path planning.
+
+There is one quirk in the pasted source: the helper `distance()` computes a distance but does not return it. That means any helper depending on `distance(...) < cr` for corner checks may not work as intended, although the edge checks inside `circleToRect()` still exist.
+
+## 6. Targeting
+
+Targeting is range-scan based. A troop keeps a `target` index in `data[14]`. If it has no valid target, it scans enemy troops/towers and picks a target that matches its `targetType`.
+
+Target types include things like:
+
+* `"all"`
+* `"ground"`
+* `"air"`
+* `"buildings"`
+* `"troops"`
+* `"none"`
+
+The troop also has `type`, such as:
+
+* `"ground"`
+* `"air"`
+* `"hovering"`
+* `"building"`
+* `"spell"`
+* `"bomb"`
+
+A troop can only target enemies matching its `targetType`. Buildings-only troops like Giant ignore normal troops and look for buildings. Ground-only units ignore air. All-targeting units can hit both.
+
+The engine also models tower activation. King towers are present from the start, but the logic treats princess towers specially and does not always allow the king tower to participate immediately. The active tower positions and tower attack stats are initialized directly in `bTroops` and `rTroops`.
+
+## 7. Attacking and cooldowns
+
+Once a target is in attack range, the unit faces the target, locks on, and uses cooldown logic. If the unit just locked onto a target, the code can add a retarget penalty before the first shot. Then, when cooldown drops below `1`, the attack fires and the cooldown is reset by adding `maxCooldown`.
+
+The relevant attack flow is:
+
+1. Check target exists.
+2. Calculate distance to target.
+3. If target is within attack range:
+
+   * face target
+   * lock if not locked
+   * add retarget penalty if applicable
+   * if cooldown is ready, attack
+4. If target is out of range:
+
+   * move toward target or bridge
+
+Melee units do instant damage if their range is small enough and they use the default projectile behavior. Ranged units usually spawn a projectile object. Area attackers create non-targeted AoE projectiles or spell-like hit zones.
+
+## 8. Projectiles
+
+The engine uses two projectile systems:
+
+### Targeted projectiles
+
+These are stored in arrays like `bProj` and `rProj`. They track a target index and chase it. A projectile usually looks like:
+
+```js
+["arrow", x, y, target, damage, speed, aoe, targetable, effects]
+```
+
+These are used for normal ranged attacks.
+
+### Non-targeted projectiles
+
+These are stored in `bNProj` and `rNProj`. They are used for:
+
+* spells
+* area effects
+* rolling attacks
+* delayed hits
+* shotgun/spread attacks
+* graveyard-style repeated spawns
+* tornado-like pulls
+* clone effects
+* projectile fragments
+
+The combat code pushes AoE and shotgun-style attacks into the non-targeted projectile arrays.
+
+## 9. Spells
+
+Spells are represented as cards whose troop template has type `"spell"` and whose card has an extra `"spell"` marker. Placement treats them differently: spells can be placed almost anywhere except banned tiles.
+
+Internally, many spells are implemented as special tags on a zero-health “spell troop.” Examples from the card data include:
+
+* `["spell", [...]]`
+* `["instspell", [...]]`
+* `["knockback", value]`
+* `["stun", frames]`
+* `["slow", frames]`
+* `["wait", frames]`
+
+So spells are not a totally separate system. They are just special troop/projectile templates that create effects at a position.
+
+## 10. Status effects
+
+The engine uses `effects` and `specials` arrays to add mechanics without writing a separate class for every card.
+
+Common effects include:
+
+* `stun`: disables movement/attacking and can reset targeting.
+* `slow`: reduces movement and attack cadence.
+* `rage`: increases movement and attack cadence.
+* `snare`: heavily reduces movement.
+* `knockback`: pushes a unit in a direction.
+* `nontargetable`: prevents enemy targeting.
+* `invulnerable` / `uinvulnerable`: prevents damage.
+* `cloned`: marks clone behavior.
+* `noCol`: disables collision.
+
+These tags are processed every frame before movement and attacks.
+
+## 11. Special card mechanics
+
+The card data uses many `specials` tags to model Clash-style mechanics.
+
+Important examples:
+
+* `lifetime`: buildings decay over time.
+* `spawner`: periodically creates troops.
+* `split`: creates new troops on death.
+* `dsplit`: directional split, often used so death spawns face correctly.
+* `deathElixir`: grants elixir when killed, used for Elixir Golem blobs.
+* `kamikaze`: dies after attacking, used for spirits/wall breakers.
+* `inferno`: damage ramps up while locked onto the same target.
+* `charge`: builds a charge while moving, then changes speed/damage.
+* `jumping`: allows river-jump behavior.
+* `dash` / `jump`: special movement-to-target attacks.
+* `chain`: makes attacks jump to additional targets.
+* `recoil`: pushes the attacker backward after firing.
+* `retainTarget`: passes target information into a transformed/split unit.
+* `noTargetChange`: prevents normal retargeting.
+* `ddmg`: death damage.
+* `sdmg`: spawn damage.
+* `aoea`: attack-area AoE.
+* `sptrgt`: splash at target.
+* `ctreduc`: crown-tower damage reduction.
+
+This is why the engine can support many cards with one generic troop loop: cards are mostly data plus tags.
+
+## 12. Elixir, decks, and cycling
+
+Elixir is stored separately for each side:
+
+* `elixir`
+* `elixirR`
+
+The global regen speed starts as `regenX = 1`, then becomes `regenX / 84`, so at the game’s 30 FPS, normal elixir generation is about one elixir every 84 frames, or roughly 2.8 seconds. The starting and max elixir settings are defined near the top of the file.
+
+Each side has:
+
+* a deck array
+* an order array
+* selected card index
+* card cooldown
+
+The visible hand uses the order array. When a card is played, the selected slot cycles to the back, bringing the next card forward. Mirror uses `lastCardB` or `lastCardR` to replay the last non-Mirror card. The code keeps `lastCardB` and `lastCardR` explicitly for that.
+
+## 13. Push mode / scenario mode
+
+There is also a “push” mode system. A push is an array of timed enemy placements:
+
+```js
+[card, x, y, time]
+```
+
+The default `pushInit()` defines waves such as Spear Goblins + Freeze, Giant + Witch, Battle Ram pushes, Balloon pushes, Golem pushes, and so on. It also defines wave durations, starting elixir values, difficulty calculation, optional deck forcing, and shuffled wave order.
+
+So Push mode is basically a scripted enemy wave generator layered on top of the same placement/spawn engine.
+
+## 14. The most important MVP mental model
+
+The engine is built around this loop:
+
+1. Draw arena and UI.
+2. Read input/card selection.
+3. If placement is valid, clone card troop templates into `bTroops` or `rTroops`.
+4. Process effects and specials.
+5. Acquire or validate targets.
+6. Move troops:
+
+   * direct movement for air/hovering/jumpers
+   * bridge steering for ground troops
+7. Resolve attacks and cooldowns.
+8. Update projectiles and spell areas.
+9. Apply damage/effects.
+10. Handle deaths, splits, death damage, elixir gain, and tower removal.
+11. Cycle cards and update elixir.
+
+The biggest simplification: **it behaves like Clash Royale, but the pathfinding is not generalized.** It is a hand-authored bridge/lane steering system with continuous movement and lots of data-driven combat tags.
+
+
+
+User: what about below the king tower? there are a few tiles we can place cards but not on the entire row. describe the arena properly please
+
+
+You’re right — the arena is **not** just a clean 32×18 rectangle of playable tiles. It is a 32-row × 18-column tile grid, but some edge, tower, and river tiles are specially classified.
+
+The engine maps mouse position to tiles like this:
+
+```js
+row = floor((mouseY - 60) / 15)
+col = floor((mouseX - 60) / 15)
+```
+
+So the playable board is drawn from pixel `(60, 60)` to about `(330, 540)`, with each tile being `15×15` pixels.
+
+## Tile coordinates
+
+Use this mental model:
+
+* `row 0` = very top edge, Red back row
+* `row 31` = very bottom edge, Blue back row
+* `col 0` = far left
+* `col 17` = far right
+* center columns are around `8` and `9`
+* river is rows `15–16`
+
+The tower centers are:
+
+| Tower               |    Row |    Col |
+| ------------------- | -----: | -----: |
+| Red King            |    `3` |    `9` |
+| Red left Princess   |  `6.5` |  `3.5` |
+| Red right Princess  |  `6.5` | `14.5` |
+| Blue King           |   `29` |    `9` |
+| Blue left Princess  | `25.5` |  `3.5` |
+| Blue right Princess | `25.5` | `14.5` |
+
+Those come directly from the initial `bTroops` and `rTroops` tower arrays.
+
+## The terrain map
+
+Symbols:
+
+```txt
+. = normal terrain
+B = banned edge tile
+K = king/crown tower blocked zone
+P = princess tower blocked zone
+R = river water
+= = bridge tile
+```
+
+The raw arena terrain is:
+
+```txt
+cols: 012345678901234567
+
+row 00: BBBBBB......BBBBBB
+rows 01-04: .......KKKK.......
+rows 05-07: ..PPP........PPP..
+rows 08-14: ..................
+rows 15-16: RRR=RRRRRRRRRR=RRR
+rows 17-23: ..................
+rows 24-26: ..PPP........PPP..
+rows 27-30: .......KKKK.......
+row 31: BBBBBB......BBBBBB
+```
+
+That last row is the part you pointed out: **below the king tower, only columns `6–11` are normal/placeable terrain.** Columns `0–5` and `12–17` are banned. This comes from the `getTileInfo()` rule:
+
+```js
+if (trueI === 15) {
+    if (j < 6 || j > 11) {
+        type = "banned";
+    }
+}
+```
+
+Since `trueI === 15` only happens on rows `0` and `31`, only the top and bottom edge rows get that special “center only” rule.
+
+## Tower zones
+
+The king/crown tower zone is a **4×4 blocked square** on each side:
+
+```txt
+Red king blocked zone:  rows 1–4,  cols 7–10
+Blue king blocked zone: rows 27–30, cols 7–10
+```
+
+So for Blue, the king tower itself sits at about `(29, 9)`, and the blocked crown area surrounds rows `27–30`, columns `7–10`. But the row **behind** it, row `31`, is not part of that `K` zone. That is why you can still place in the six center tiles behind/below the king tower:
+
+```txt
+row 31: cols 6 7 8 9 10 11
+```
+
+The princess tower zones are **3×3 blocked squares**:
+
+```txt
+Red left princess:   rows 5–7,  cols 2–4
+Red right princess:  rows 5–7,  cols 13–15
+Blue left princess:  rows 24–26, cols 2–4
+Blue right princess: rows 24–26, cols 13–15
+```
+
+The code labels both crown and princess areas as places where “spells and air troops can be placed here, but ground troops and other cards cannot go here.” In normal card placement, though, the placement check blocks `river`, `banned`, `princess`, and `crown` tiles by default.
+
+## River and bridges
+
+The river is only rows `15` and `16`.
+
+Most of those two rows are river water, except for two bridge columns:
+
+```txt
+left bridge:  col 3
+right bridge: col 14
+```
+
+So rows `15–16` look like:
+
+```txt
+RRR=RRRRRRRRRR=RRR
+```
+
+That means the bridge is not represented as a wide rectangle in the tile logic. It is effectively one tile column wide per bridge, mirrored left and right. The drawing functions color those bridge tiles differently when `trueJ > 4 && trueJ < 6`, which resolves to the same bridge columns.
+
+## Blue’s normal starting deployment area
+
+For normal non-spell, non-recruit cards, Blue initially can place on its side, but not on tower zones, river, or banned edge tiles.
+
+With both Red princess towers alive, Blue’s normal initial deployment is roughly:
+
+```txt
+rows 17–23: all normal columns 0–17
+rows 24–26: all except Blue princess zones at cols 2–4 and 13–15
+rows 27–30: all except Blue king/crown zone at cols 7–10
+row 31: only cols 6–11
+```
+
+So yes: **the bottom row is intentionally only a six-tile strip behind the king tower**, not the full row.
+
+## Enemy-side unlock behavior
+
+Blue also has a territory lock. The code blocks Blue from placing above row `11` no matter what:
+
+```js
+if (tileHover[0] < 11) {
+    placeable = false;
+}
+```
+
+Then it also blocks rows `11–16` by lane while the matching Red princess tower is alive:
+
+```js
+if (rTroops[1] !== "null" && tileHover[0] < 17 && tileHover[1] < 9) {
+    placeable = false;
+}
+if (rTroops[2] !== "null" && tileHover[0] < 17 && tileHover[1] > 8) {
+    placeable = false;
+}
+```
+
+So after Blue destroys Red’s left princess tower, Blue can place deeper on the left lane, down to row `11`, but not into Red’s king-tower back area. Same idea for the right lane.
+
+## Spells
+
+Spells are the exception. The placement logic says that if a card is marked as `"spell"`, it can be placed anywhere except `banned` tiles. So spells can be used over river, tower zones, and most of the arena, but still cannot be centered on the banned outer edge tiles.
+
+## Red side mirrors this
+
+Red has the mirrored version:
+
+* Red cannot place below row `20`.
+* If Blue princess towers are alive, Red cannot place into the lower lane-extension rows.
+* Red’s top edge row `0` also only has the six center normal tiles, columns `6–11`.
+* Red’s king/crown blocked zone is rows `1–4`, columns `7–10`.
+
+So the proper arena description is:
+
+> A 32×18 grid with mirrored tower-block zones, a two-row river, two one-column bridge gaps, and special top/bottom edge rows where only the center six tiles are valid. Normal card placement then overlays side-based deployment rules on top of that terrain map.

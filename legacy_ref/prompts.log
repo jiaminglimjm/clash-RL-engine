@@ -1,0 +1,73 @@
+19/6/2026 Friday 2:38 AM
+I am planning to develop a Clash Royale engine to eventually train an RL model to play at a superhuman level. This engine needs to be able to run headless and ideally parallel, and it should be a faithful deterministic simulator that includes a renderer for debugging and testing purposes. For the cards, we must take into account many stats: HP, damage, speed, hit speed, melee/range distance, weight, size, targeting, splash radius. and for cards with special things like champion/hero abilities or evolutions, the project structure should be modular and extensible. For now, i want a working starting point, and you can use the legacy code and docs as reference for arena (tiles, bridges, towers) specification, card mechanics, pathfinding, timing, etc (though the latest updates would be different by now). as it is a reasonably tested clash royale engine despite being messy and not flexible. As for starters, you may begin with just knight, archers, minions, fireball, canon, giant, musketeer, mini pekka, with a 4 card cycle each, with 8 cards in a deck. Also, i want the workflow to be 'human-in-the-loop' where i can hop onto localhost:8000 and check your rendered output and see if it feels right (as I am a good clash royale player). the renderer should be simple circles (blue for my cards, red for opponents) with labels and an inner circle secondary color for each card for easier distinguishing. While the engine is deterministic, you must also take into account the designs around online play: latency, placement delay, synchronization. While our first prototype wont be online, ensure that its design could be extended in that direction. In fact, anticipate that eventually we'll add all the cards and possibly different gamemodes, so the project has to be organized really well. Keep the game replay data structure compact as it may assume the engine is deterministic, just requiring version number at the beginning. for card stats, please refer to the retro royale excel file provided.
+
+card secondary colours for easy identification:
+knight: gray
+archers: pink
+minions: blue
+fireball: orange
+cannon: dark gray
+musketeer: purple
+giant: brown
+mini pekka: dark gray
+
+
+
+
+19/6/2026 Friday 3:24 AM
+1. it's hard to click the buttons to select which card to play, i suspect that it's cuz it's refreshing too fast that only by chance sometimes u can click it. my suggestion, rather than clicking blue and red then choosing the cards, show all of them in two columns. 1–4 will be hotkeys for blue, 5–8 will be for red cards.
+2. the pathfinding is a little wrong. troops get blocked by buildings (they should know to go round towers and buildings). and when placed around the center, they first move horizontally then vertically across the bridge, it should start by going diagonally unless they're stuck behind the king tower, then horizontally makes sense.
+3. i feel the bridge is supposed to be slightly wider, kinda two tiles wide, but like as it is now, with extra 0.5 tiles on each side. you know what i mean?
+4. when the king tower gets destroyed, all three of the towers should be destroyed and the game should end
+5. also i noticed the king tower's range is slightly too short, even after i activated the opponent's king tower by fireballing it, it could shoot my giant as it was bashing the princess tower. it should be 7 tiles
+6. when selecting a card, the renderer should lightly highlight in red which tiles you shouldnt be able to place it on.
+
+
+
+
+22/06/2026 Monday 5:32pm
+some things to fix:
+1. rn fireball knocks back giant, but it should be too heavy to knockback. i believe 18 weight onwards shouldnt be knocked back. also, for the renderer when you hover spells it should show the circle of impact.
+2. when placed at the bridge, a giant blocks opponent's giant at bridge for too long. i like your current pathfinding logic for cards to not get stuck but it's not good enough on the bridge.
+3. retargeting. troop pulling with buildings or other troops. i.e. cards should prioritize targeting other troops before tower if they are nearer, unless they alr started hitting the tower. if they alr started hitting the tower, they'd either have to be pushed or pulled away to retarget or stunned/frozen "reset" to retarget to troop.
+4. also, i noticed that when i place minions at the back, the placements are slightly inconsistent. for example, if i click exactly in the middle of the two squares, the minions then correctly split one to the left and two to the right. but if i click on the middle of either of those two back middle tiles, they all go in the same lane. however, when you place a card it should not matter which part of the tile u clicked, they should be consistent either or. i believe the fix is to simply snap the placement of cards to the center of the tile u clicked on. for rendering, you should also show with light opacity of where the troops would be placed when hovering over a valid tile.
+5. cannon size seems small. buildings should be square. cannon in particular takes up a 3x3 tile space. also, its lifespan is 30s, and its HP should reduce constantly even when nothing is attacking it.
+6. for melee troops, whenever it hits, the renderer should make its outer circle blink so i can tell when its hitting. also, make the inner circle slightly bigger radius. also, draw a thin arrow to show which direction each troop is facing.
+7. when the game ends, stop the timer.
+8. increase the range of the king tower by 1 tile
+
+
+
+
+1. after 180 seconds it should go into 2x elixir mode, and sudden death mode where if u destroy any tower u win. after 300s the game should end with a tiebreaker. the player with the lowest health tower has the lowest health loses. only if both sides' lowest health tower have the same health does the game end in a draw.
+2. for the king tower: "Activation takes 4 seconds to complete - it takes 3.3 seconds for the King Tower's cannon to aim at an enemy target, and another 0.7 seconds before it shoots its first cannonball."
+3. when i place a card, the new card should take place of the just played card. not shift all cards up.
+4. pathfinding is still fishy. they jitter diagonally. and sometimes get stuck on the bridge.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.
