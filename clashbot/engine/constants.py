@@ -17,6 +17,7 @@ NORMAL_ELIXIR_TICKS = 84
 
 # Converts card movement stats into simulator movement. Card stats remain source values.
 TROOP_MOVEMENT_SPEED_FACTOR = 1.2
+MULTI_UNIT_SPAWN_STAGGER_TICKS = 1
 
 SUDDEN_DEATH_START_SECONDS = 180
 MATCH_END_SECONDS = 300

@@ -2,6 +2,7 @@ import unittest
 
 from clashbot.engine.constants import (
     MATCH_END_TICKS,
+    MULTI_UNIT_SPAWN_STAGGER_TICKS,
     SIDE_BLUE,
     SIDE_RED,
     SUDDEN_DEATH_START_TICKS,
@@ -15,9 +16,17 @@ from clashbot.engine.replay import CompactReplay
 from clashbot.engine.simulation import GameEngine, GameOptions
 
 
+STARTER_DECK = ("knight", "archers", "minions", "fireball", "cannon", "giant", "musketeer", "mini_pekka")
+
+
 class SimulationTests(unittest.TestCase):
-    def make_engine(self):
-        return GameEngine(options=GameOptions(placement_delay_ticks=0))
+    def make_engine(self, blue_deck=None, red_deck=None):
+        kwargs = {"options": GameOptions(placement_delay_ticks=0)}
+        if blue_deck is not None:
+            kwargs["blue_deck"] = blue_deck
+        if red_deck is not None:
+            kwargs["red_deck"] = red_deck
+        return GameEngine(**kwargs)
 
     def first_troop_slot(self, engine, side=SIDE_BLUE):
         for index, card_id in enumerate(engine.players[side].hand()):
@@ -38,7 +47,7 @@ class SimulationTests(unittest.TestCase):
         self.assertTrue(any(entity.card_id == card_id for entity in engine.entities.values()))
 
     def test_placement_snaps_to_clicked_tile_center(self):
-        engine = self.make_engine()
+        engine = self.make_engine(blue_deck=STARTER_DECK)
         hand_slot, card_id = self.first_troop_slot(engine)
         engine.submit_play(SIDE_BLUE, hand_slot, 9.1, 24.9)
         engine.step()
@@ -95,6 +104,46 @@ class SimulationTests(unittest.TestCase):
         self.assertAlmostEqual(cannon.radius, 0.6)
         self.assertAlmostEqual(cannon.footprint, 2.4)
 
+    def test_played_multi_unit_card_spawns_left_to_right_with_stagger(self):
+        engine = GameEngine(
+            blue_deck=("archers", "knight", "minions", "fireball", "cannon", "giant", "musketeer", "mini_pekka"),
+            options=GameOptions(placement_delay_ticks=0),
+        )
+        engine.submit_play(SIDE_BLUE, 0, 9.0, 24.0)
+        engine.step()
+        archers = [entity for entity in engine.entities.values() if entity.card_id == "archers"]
+        self.assertEqual(len(archers), 1)
+        self.assertLess(archers[0].pos.x, 9.5)
+        self.assertEqual(len(engine.pending_spawns), 1)
+        self.assertEqual(engine.pending_spawns[0].execute_tick, MULTI_UNIT_SPAWN_STAGGER_TICKS)
+
+        engine.step(MULTI_UNIT_SPAWN_STAGGER_TICKS - 1)
+        self.assertEqual(len([entity for entity in engine.entities.values() if entity.card_id == "archers"]), 1)
+
+        engine.step()
+        archers = sorted(
+            [entity for entity in engine.entities.values() if entity.card_id == "archers"],
+            key=lambda entity: entity.entity_id,
+        )
+        self.assertEqual(len(archers), 2)
+        self.assertLess(archers[0].pos.x, archers[1].pos.x)
+
+    def test_tower_pathing_uses_circular_collision_radius_not_footprint(self):
+        engine = self.make_engine()
+        tower = engine._tower_entity(SIDE_RED, "left_princess")
+        assert tower is not None
+        tower.radius = 1.0
+        tower.footprint_tiles = 4.0
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["knight"], Vec2(0.5, tower.pos.y + 1.8))
+        knight = next(entity for entity in engine.entities.values() if entity.side == SIDE_BLUE and entity.card_id == "knight")
+        knight.deploy_ticks_remaining = 0
+
+        near_square_edge = Vec2(6.5, tower.pos.y + 1.8)
+        through_circle = Vec2(6.5, tower.pos.y + 1.0)
+
+        self.assertIsNone(engine._first_blocking_building(knight, near_square_edge, None))
+        self.assertEqual(engine._first_blocking_building(knight, through_circle, None), tower)
+
     def test_hidden_card_stats_are_exposed(self):
         engine = self.make_engine()
         snapshot = engine.snapshot()
@@ -111,6 +160,173 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(minion["hitSpeedTicks"], minion_spec.hit_speed_ticks)
         self.assertEqual(fireball["spellCrownTowerDamage"], fireball_spec.crown_tower_damage)
         self.assertEqual(fireball["spellKnockbackTiles"], fireball_spec.knockback_tiles)
+
+    def test_requested_excel_cards_are_registered(self):
+        def ticks(seconds):
+            return max(1, int(round(seconds * TICKS_PER_SECOND)))
+
+        expected = {
+            "spear_goblins": ("Spear Goblins", "troop", 2, 3, "ground", "all", 133, 81, 120, 5.0, 1.7, 500, 0.0, 1, 0.5, 0.5, 1.2),
+            "goblins": ("Goblins", "troop", 2, 4, "ground", "ground", 202, 120, 120, 0.5, 1.1, 0, 0.0, 2, 0.4, 0.2, 0.9),
+            "bomber": ("Bomber", "troop", 2, 1, "ground", "ground", 304, 225, 60, 4.5, 1.8, 400, 1.5, 4, 0.5, 0.2, 1.6),
+            "skeletons": ("Skeletons", "troop", 1, 3, "ground", "ground", 81, 81, 90, 0.5, 1.0, 0, 0.0, 1, 0.2, 0.5, 0.5),
+            "barbarians": ("Barbarians", "troop", 5, 5, "ground", "ground", 670, 192, 60, 0.7, 1.4, 0, 0.0, 4, 0.5, 0.4, 1.0),
+            "valkyrie": ("Valkyrie", "troop", 4, 1, "ground", "ground", 1907, 266, 60, 1.2, 1.5, 0, 1.9, 5, 0.5, 0.1, 1.4),
+            "fire_spirit": ("Fire Spirit", "troop", 1, 1, "ground", "all", 230, 207, 120, 2.5, 1.0, 400, 1.7, 1, 0.4, 0.2, 0.1),
+            "tombstone": ("Tombstone", "building", 3, 1, "building", "none", 529, 0, 0, 0.0, 0.0, 0, 0.0, 0, 1.0, None, None),
+            "witch": ("Witch", "troop", 5, 1, "ground", "all", 839, 135, 60, 5.5, 1.1, 600, 1.0, 8, 0.5, 0.7, 0.4),
+            "bats": ("Bats", "troop", 2, 5, "air", "all", 81, 81, 120, 1.2, 1.3, 0, 0.0, 1, 0.3, 0.6, 0.7),
+            "mega_minion": ("Mega Minion", "troop", 3, 1, "air", "all", 837, 312, 60, 1.6, 1.6, 1000, 0.0, 6, 0.6, 0.4, 1.2),
+            "goblin_hut": ("Goblin Hut", "building", 5, 1, "building", "none", 1180, 0, 0, 0.0, 0.0, 0, 0.0, 0, 1.0, None, None),
+        }
+        engine = self.make_engine()
+        for card_id, values in expected.items():
+            with self.subTest(card_id=card_id):
+                (
+                    display_name,
+                    kind,
+                    elixir,
+                    count,
+                    movement_type,
+                    target_mode,
+                    hp,
+                    damage,
+                    speed,
+                    attack_range,
+                    hit_speed_seconds,
+                    projectile_speed,
+                    splash_radius,
+                    mass,
+                    radius,
+                    first_attack_seconds,
+                    load_time_seconds,
+                ) = values
+                spec = CARD_SPECS[card_id]
+                unit = spec.units[0]
+                self.assertEqual(spec.display_name, display_name)
+                self.assertEqual(spec.kind, kind)
+                self.assertEqual(spec.elixir, elixir)
+                self.assertEqual(unit.movement_type, movement_type)
+                self.assertEqual(unit.target_mode, target_mode)
+                self.assertEqual(unit.hp, hp)
+                self.assertEqual(unit.damage, damage)
+                self.assertEqual(unit.speed_tiles_per_minute, speed)
+                self.assertEqual(unit.attack_range, attack_range)
+                self.assertEqual(unit.hit_speed_ticks, 0 if hit_speed_seconds == 0.0 else ticks(hit_speed_seconds))
+                self.assertEqual(unit.projectile_speed_tiles_per_minute, projectile_speed)
+                self.assertEqual(unit.splash_radius, splash_radius)
+                self.assertEqual(unit.mass, mass)
+                self.assertEqual(unit.radius, radius)
+                self.assertEqual(unit.sight_range, 0.0 if card_id in ("tombstone", "goblin_hut") else 5.5)
+                if first_attack_seconds is not None:
+                    self.assertEqual(unit.first_attack_ticks, ticks(first_attack_seconds))
+                if load_time_seconds is not None:
+                    self.assertEqual(unit.load_time_ticks, ticks(load_time_seconds))
+                spawns = engine._expanded_card_unit_spawns(SIDE_BLUE, spec, Vec2(9.5, 24.5))
+                self.assertEqual(len(spawns), count)
+
+    def test_fire_spirit_self_destructs_after_launching_attack(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["fire_spirit"], Vec2(9.5, 10.5))
+        engine._spawn_card_units(SIDE_RED, CARD_SPECS["knight"], Vec2(9.5, 9.0))
+        fire_spirit = next(entity for entity in engine.entities.values() if entity.card_id == "fire_spirit")
+        knight = next(entity for entity in engine.entities.values() if entity.side == SIDE_RED and entity.card_id == "knight")
+        fire_spirit.deploy_ticks_remaining = 0
+        knight.deploy_ticks_remaining = 0
+
+        engine.step((fire_spirit.first_attack_ticks or 0) + 1)
+
+        self.assertNotIn(fire_spirit.entity_id, engine.entities)
+        self.assertTrue(any(projectile.source_card_id == "fire_spirit" for projectile in engine.projectiles.values()))
+
+        engine.step(20)
+
+        self.assertEqual(knight.hp, knight.max_hp - CARD_SPECS["fire_spirit"].units[0].damage)
+
+    def test_witch_periodically_summons_skeletons(self):
+        engine = self.make_engine()
+        for entity in list(engine.entities.values()):
+            if entity.side == SIDE_RED and entity.kind == "tower":
+                engine.entities.pop(entity.entity_id)
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["witch"], Vec2(9.5, 24.5))
+        witch = next(entity for entity in engine.entities.values() if entity.card_id == "witch")
+        witch.deploy_ticks_remaining = 0
+
+        engine.step(max(0, self.ticks(1.0) - 1))
+        self.assertEqual(self.count_units(engine, "witch", "skeleton"), 0)
+
+        engine.step()
+        self.assertEqual(self.count_units(engine, "witch", "skeleton"), 4)
+
+        engine.step(self.ticks(7.0))
+        self.assertEqual(self.count_units(engine, "witch", "skeleton"), 8)
+
+    def test_tombstone_periodic_and_death_spawns_skeletons(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["tombstone"], Vec2(9.5, 24.5))
+        tombstone = next(entity for entity in engine.entities.values() if entity.card_id == "tombstone")
+        tombstone.deploy_ticks_remaining = 0
+
+        engine.step(self.ticks(3.1))
+        self.assertEqual(self.count_units(engine, "tombstone", "skeleton"), 2)
+
+        engine._damage_entity(SIDE_RED, tombstone, tombstone.hp)
+        engine._cleanup_dead()
+
+        skeletons = [
+            entity for entity in engine.entities.values()
+            if entity.card_id == "tombstone" and entity.unit_id == "skeleton"
+        ]
+        self.assertEqual(len(skeletons), 5)
+        self.assertTrue(all(entity.deploy_ticks_remaining == 0 for entity in skeletons))
+
+    def test_goblin_hut_spawns_only_when_enemy_is_in_range_and_death_spawns(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["goblin_hut"], Vec2(9.5, 24.5))
+        hut = next(entity for entity in engine.entities.values() if entity.card_id == "goblin_hut")
+        hut.deploy_ticks_remaining = 0
+
+        engine.step(self.ticks(4.5))
+        self.assertEqual(self.count_units(engine, "goblin_hut", "spear_goblin"), 0)
+        engine._damage_entity(SIDE_RED, hut, hut.hp)
+        engine._cleanup_dead()
+        self.assertEqual(self.count_units(engine, "goblin_hut", "spear_goblin"), 0)
+
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["goblin_hut"], Vec2(9.5, 24.5))
+        hut = next(entity for entity in engine.entities.values() if entity.card_id == "goblin_hut")
+        hut.deploy_ticks_remaining = 0
+        engine._spawn_card_units(SIDE_RED, CARD_SPECS["knight"], Vec2(9.5, 21.0))
+        red_knight = next(
+            entity for entity in engine.entities.values()
+            if entity.side == SIDE_RED and entity.card_id == "knight"
+        )
+        red_knight.deploy_ticks_remaining = 0
+
+        engine.step(self.ticks(4.5))
+        self.assertEqual(self.count_units(engine, "goblin_hut", "spear_goblin"), 1)
+
+        engine._damage_entity(SIDE_RED, hut, hut.hp)
+        engine._cleanup_dead()
+
+        spear_goblins = [
+            entity for entity in engine.entities.values()
+            if entity.card_id == "goblin_hut" and entity.unit_id == "spear_goblin"
+        ]
+        self.assertEqual(len(spear_goblins), 4)
+        self.assertTrue(all(entity.deploy_ticks_remaining == 0 for entity in spear_goblins))
+
+    def test_tombstone_death_spawns_on_lifetime_expiry(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["tombstone"], Vec2(9.5, 24.5))
+        tombstone = next(entity for entity in engine.entities.values() if entity.card_id == "tombstone")
+        tombstone.deploy_ticks_remaining = 0
+        tombstone.lifetime_ticks_remaining = 1
+
+        engine.step()
+
+        self.assertFalse(any(entity.unit_id == "tombstone" for entity in engine.entities.values()))
+        self.assertEqual(self.count_units(engine, "tombstone", "skeleton"), 3)
 
     def test_new_target_waits_first_attack_delay_before_hit(self):
         engine = self.make_engine()
@@ -135,7 +351,7 @@ class SimulationTests(unittest.TestCase):
         self.assertTrue(blue_knight.target_locked)
 
     def test_center_troop_moves_diagonally_toward_bridge(self):
-        engine = self.make_engine()
+        engine = self.make_engine(blue_deck=STARTER_DECK)
         hand_slot, card_id = self.first_troop_slot(engine)
         engine.submit_play(SIDE_BLUE, hand_slot, 9.0, 24.0)
         engine.step(35)
@@ -315,7 +531,8 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(engine.tick, ended_tick)
 
     def test_replay_command_stream_is_deterministic(self):
-        first = self.make_engine()
+        deck = ("archers", "knight", "minions", "fireball", "cannon", "giant", "musketeer", "mini_pekka")
+        first = GameEngine(blue_deck=deck, red_deck=deck, options=GameOptions(placement_delay_ticks=0))
         first.submit_play(SIDE_BLUE, 0, 9.0, 24.0)
         first.step(8)
         first.submit_play(SIDE_RED, 0, 9.0, 8.0)
@@ -326,6 +543,17 @@ class SimulationTests(unittest.TestCase):
         second = GameEngine.from_replay(replay, options=GameOptions(placement_delay_ticks=0))
         second.run_replay_commands(replay, until_tick=first.tick)
         self.assertEqual(first.state_hash(), second.state_hash())
+
+    def ticks(self, seconds):
+        return max(1, int(round(seconds * TICKS_PER_SECOND)))
+
+    def count_units(self, engine, card_id, unit_id):
+        return len(
+            [
+                entity for entity in engine.entities.values()
+                if entity.card_id == card_id and entity.unit_id == unit_id
+            ]
+        )
 
 
 if __name__ == "__main__":

@@ -17,9 +17,21 @@ EXPECTED_NAKED_BRIDGE = {
     "minions": {"princess_hp": 2517},
     "knight": {"princess_hp": 1638, "princess_hits": 7},
     "archers": {"princess_hp": 2604},
+    "spear_goblins": {"princess_hp": 2728},
+    "goblins": {"princess_hp": 2692},
+    "bomber": {"princess_hp": 2827},
+    "skeletons": {"princess_hp": 3052},
+    "barbarians": {"princess_hp": 0, "king_hp": 2712},
+    "witch": {"princess_hp": 1351},
+    "fire_spirit": {"princess_hp": 2845},
+    "bats": {"princess_hp": 3052},
+    "mega_minion": {"princess_hp": 2740},
+    "tombstone": {"princess_hp": 3052},
+    "goblin_hut": {"princess_hp": 3052},
+    "valkyrie": {"princess_hp": 1190},
     "mini_pekka": {"princess_hp": 32, "princess_hits": 4},
     "wizard": {"princess_hp": 2209, "princess_hits": 3},
-    "giant": {"princess_hp": 0, "king_hits": 1},
+    "giant": {"princess_hp": 0, "king_hp": 4571},
     "musketeer": {"princess_hp": 1967, "princess_hits": 5},
     "fireball": {"princess_hp": 2880},
 }
@@ -32,10 +44,7 @@ def run_naked_bridge(card_id, max_ticks=2400):
     if card.kind == "spell":
         engine._cast_spell(SIDE_BLUE, card, RED_LEFT_PRINCESS)
     else:
-        engine._spawn_card_units(SIDE_BLUE, card, BRIDGE_LEFT)
-        for entity in engine.entities.values():
-            if entity.side == SIDE_BLUE and entity.card_id == card_id:
-                entity.deploy_ticks_remaining = 0
+        engine._deploy_card_units(SIDE_BLUE, card, BRIDGE_LEFT)
 
     princess_hits = 0
     king_hits = 0

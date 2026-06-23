@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import heapq
 import json
@@ -18,13 +18,14 @@ from .arena import (
     tile_type,
     RIVER,
 )
-from .cards import CARD_SPECS, DEFAULT_DECK, TOWER_SPECS, CardSpec, UnitSpec
+from .cards import CARD_SPECS, DEFAULT_DECK, TOWER_SPECS, CardSpec, SpawnSpec, UnitSpec
 from .constants import (
     ARENA_COLS,
     ARENA_ROWS,
     ENGINE_VERSION,
     KING_ACTIVATION_DELAY_TICKS,
     MATCH_END_TICKS,
+    MULTI_UNIT_SPAWN_STAGGER_TICKS,
     SUDDEN_DEATH_START_TICKS,
     SIDE_BLUE,
     SIDE_RED,
@@ -40,6 +41,17 @@ from .replay import CompactReplay, build_replay
 BUILDING_PLACEMENT_TILES = 3.0
 GROUND_SEGMENT_SAMPLE_TILES = 0.2
 BUILDING_AVOIDANCE_MARGIN = 0.15
+
+
+@dataclass(order=True)
+class ScheduledSpawn:
+    execute_tick: int
+    sequence: int
+    side: str = field(compare=False)
+    card_id: str = field(compare=False)
+    unit_spec: UnitSpec = field(compare=False)
+    pos: Vec2 = field(compare=False)
+    secondary_color: str = field(compare=False)
 
 
 @dataclass(frozen=True)
@@ -64,6 +76,7 @@ class GameEngine:
         self.tick = 0
         self._next_entity_id = 1
         self._next_projectile_id = 1
+        self._next_spawn_sequence = 1
         self.players: Dict[str, PlayerState] = {
             SIDE_BLUE: PlayerState(SIDE_BLUE, tuple(blue_deck)),
             SIDE_RED: PlayerState(SIDE_RED, tuple(red_deck)),
@@ -71,6 +84,7 @@ class GameEngine:
         self.entities: Dict[int, Entity] = {}
         self.projectiles: Dict[int, Projectile] = {}
         self.pending_commands: List[ScheduledCommand] = []
+        self.pending_spawns: List[ScheduledSpawn] = []
         self.accepted_commands: List[ScheduledCommand] = []
         self.event_log: List[str] = []
         self.king_activated: Dict[str, bool] = {SIDE_BLUE: False, SIDE_RED: False}
@@ -164,8 +178,10 @@ class GameEngine:
         if self.game_over:
             return
         self._apply_due_commands()
+        self._apply_due_spawns()
         self._regen_elixir()
         self._update_timers()
+        self._update_spawners()
         self._update_king_activation()
         self._update_projectiles()
         self._cleanup_dead()
@@ -235,8 +251,21 @@ class GameEngine:
                     "cooldown": entity.attack_cooldown_ticks,
                     "deploy": entity.deploy_ticks_remaining,
                     "life": entity.lifetime_ticks_remaining,
+                    "spawnCooldowns": list(entity.spawn_cooldowns),
                 }
                 for entity in self._entities_sorted()
+            ],
+            "pendingSpawns": [
+                {
+                    "tick": spawn.execute_tick,
+                    "sequence": spawn.sequence,
+                    "side": spawn.side,
+                    "card": spawn.card_id,
+                    "unit": spawn.unit_spec.unit_id,
+                    "x": round(spawn.pos.x, 5),
+                    "y": round(spawn.pos.y, 5),
+                }
+                for spawn in sorted(self.pending_spawns)
             ],
             "projectiles": [
                 {
@@ -284,6 +313,18 @@ class GameEngine:
                 }
                 for command in sorted(self.pending_commands)
             ],
+            "pendingSpawns": [
+                {
+                    "tick": spawn.execute_tick,
+                    "side": spawn.side,
+                    "cardId": spawn.card_id,
+                    "unitId": spawn.unit_spec.unit_id,
+                    "x": round(spawn.pos.x, 3),
+                    "y": round(spawn.pos.y, 3),
+                    "sequence": spawn.sequence,
+                }
+                for spawn in sorted(self.pending_spawns)
+            ],
             "logs": list(self.event_log),
             "cards": {
                 card_id: {
@@ -311,6 +352,9 @@ class GameEngine:
                             "projectileSpeed": unit.projectile_speed_tiles_per_minute,
                             "splashRadius": unit.splash_radius,
                             "sightRange": unit.sight_range,
+                            "mechanics": list(unit.mechanics),
+                            "periodicSpawns": [self._spawn_spec_snapshot(spawn) for spawn in unit.periodic_spawns],
+                            "deathSpawns": [self._spawn_spec_snapshot(spawn) for spawn in unit.death_spawns],
                         }
                         for unit in spec.units
                     ],
@@ -357,6 +401,10 @@ class GameEngine:
             "projectileSpeed": entity.projectile_speed_tiles_per_minute,
             "splashRadius": entity.splash_radius,
             "sightRange": entity.sight_range,
+            "mechanics": list(entity.mechanics),
+            "spawnCooldowns": list(entity.spawn_cooldowns),
+            "periodicSpawns": [self._spawn_spec_snapshot(spawn) for spawn in entity.periodic_spawns],
+            "deathSpawns": [self._spawn_spec_snapshot(spawn) for spawn in entity.death_spawns],
             "secondaryColor": entity.secondary_color,
             "deployTicks": entity.deploy_ticks_remaining,
             "targetId": entity.target_id,
@@ -384,6 +432,28 @@ class GameEngine:
             "targetPos": None
             if projectile.target_pos is None
             else {"x": projectile.target_pos.x, "y": projectile.target_pos.y},
+        }
+
+    def _spawn_spec_snapshot(self, spawn: SpawnSpec) -> Dict:
+        return {
+            "initialDelayTicks": spawn.initial_delay_ticks,
+            "periodTicks": spawn.period_ticks,
+            "requiresEnemyInRange": spawn.requires_enemy_in_range,
+            "triggerRange": spawn.trigger_range,
+            "formation": [{"x": point.x, "y": point.y} for point in spawn.formation],
+            "units": [
+                {
+                    "unitId": unit.unit_id,
+                    "label": unit.label,
+                    "kind": unit.kind,
+                    "movementType": unit.movement_type,
+                    "targetMode": unit.target_mode,
+                    "hp": unit.hp,
+                    "damage": unit.damage,
+                    "radius": unit.radius,
+                }
+                for unit in spawn.units
+            ],
         }
 
     def _spawn_initial_towers(self) -> None:
@@ -441,6 +511,10 @@ class GameEngine:
             splash_radius=spec.splash_radius,
             first_attack_ticks=spec.first_attack_ticks,
             load_time_ticks=spec.load_time_ticks,
+            mechanics=spec.mechanics,
+            periodic_spawns=spec.periodic_spawns,
+            death_spawns=spec.death_spawns,
+            spawn_cooldowns=tuple(spawn.initial_delay_ticks for spawn in spec.periodic_spawns),
             footprint_tiles=spec.footprint_tiles,
             lifetime_ticks_remaining=spec.lifetime_ticks,
             lifetime_ticks_total=spec.lifetime_ticks,
@@ -458,10 +532,27 @@ class GameEngine:
         self._next_projectile_id += 1
         return projectile_id
 
+    def _allocate_spawn_sequence(self) -> int:
+        sequence = self._next_spawn_sequence
+        self._next_spawn_sequence += 1
+        return sequence
+
     def _apply_due_commands(self) -> None:
         while self.pending_commands and self.pending_commands[0].execute_tick <= self.tick:
             command = heapq.heappop(self.pending_commands)
             self._execute_command(command, record=True)
+
+    def _apply_due_spawns(self) -> None:
+        while self.pending_spawns and self.pending_spawns[0].execute_tick <= self.tick:
+            spawn = heapq.heappop(self.pending_spawns)
+            entity = self._entity_from_spec(
+                spawn.side,
+                spawn.card_id,
+                spawn.unit_spec,
+                spawn.pos,
+                spawn.secondary_color,
+            )
+            self.entities[entity.entity_id] = entity
 
     def _execute_command(self, command: ScheduledCommand, record: bool) -> bool:
         if self.game_over:
@@ -492,7 +583,7 @@ class GameEngine:
         if spec.kind == "spell":
             self._cast_spell(command.side, spec, pos)
         else:
-            self._spawn_card_units(command.side, spec, pos)
+            self._deploy_card_units(command.side, spec, pos)
         accepted = ScheduledCommand(
             execute_tick=self.tick,
             sequence=command.sequence,
@@ -516,17 +607,75 @@ class GameEngine:
         return Vec2(col + 0.5, row + 0.5)
 
     def _spawn_card_units(self, side: str, card: CardSpec, pos: Vec2) -> None:
-        unit_specs = list(card.units)
-        formation = list(card.formation)
+        for unit_spec, spawn_pos in self._expanded_card_unit_spawns(side, card, pos):
+            entity = self._entity_from_spec(side, card.card_id, unit_spec, spawn_pos, card.secondary_color)
+            self.entities[entity.entity_id] = entity
+
+    def _deploy_card_units(self, side: str, card: CardSpec, pos: Vec2) -> None:
+        spawns = self._expanded_card_unit_spawns(side, card, pos)
+        if len(spawns) <= 1:
+            self._spawn_card_units(side, card, pos)
+            return
+
+        for spawn_order, (unit_spec, spawn_pos) in enumerate(spawns):
+            execute_tick = self.tick + spawn_order * MULTI_UNIT_SPAWN_STAGGER_TICKS
+            if execute_tick <= self.tick:
+                entity = self._entity_from_spec(side, card.card_id, unit_spec, spawn_pos, card.secondary_color)
+                self.entities[entity.entity_id] = entity
+                continue
+            heapq.heappush(
+                self.pending_spawns,
+                ScheduledSpawn(
+                    execute_tick=execute_tick,
+                    sequence=self._allocate_spawn_sequence(),
+                    side=side,
+                    card_id=card.card_id,
+                    unit_spec=unit_spec,
+                    pos=spawn_pos,
+                    secondary_color=card.secondary_color,
+                ),
+            )
+
+    def _expanded_card_unit_spawns(self, side: str, card: CardSpec, pos: Vec2) -> List[Tuple[UnitSpec, Vec2]]:
+        return self._expanded_unit_spawns(side, card.units, card.formation, pos)
+
+    def _expanded_unit_spawns(
+        self,
+        side: str,
+        units: Tuple[UnitSpec, ...],
+        formation_offsets: Tuple[Vec2, ...],
+        pos: Vec2,
+    ) -> List[Tuple[UnitSpec, Vec2]]:
+        unit_specs = list(units)
+        formation = list(formation_offsets)
         if len(unit_specs) == 1 and len(formation) > 1:
             unit_specs = [unit_specs[0] for _ in formation]
         if len(formation) == 1 and len(unit_specs) > 1:
             formation = [formation[0] for _ in unit_specs]
 
         mirror_y = -1.0 if side == SIDE_RED else 1.0
-        for unit_spec, offset in zip(unit_specs, formation):
+        spawns: List[Tuple[int, UnitSpec, Vec2]] = []
+        for original_index, (unit_spec, offset) in enumerate(zip(unit_specs, formation)):
             spawn_pos = pos.add(offset.x, offset.y * mirror_y).clamp(0.05, 0.05, ARENA_COLS - 0.05, ARENA_ROWS - 0.05)
-            entity = self._entity_from_spec(side, card.card_id, unit_spec, spawn_pos, card.secondary_color)
+            spawns.append((original_index, unit_spec, spawn_pos))
+        spawns.sort(key=lambda item: (item[2].x, item[0]))
+        return [(unit_spec, spawn_pos) for _, unit_spec, spawn_pos in spawns]
+
+    def _spawn_spawn_spec(self, source: Entity, spawn: SpawnSpec) -> None:
+        for unit_spec, spawn_pos in self._expanded_unit_spawns(
+            source.side,
+            spawn.units,
+            spawn.formation,
+            source.pos,
+        ):
+            entity = self._entity_from_spec(
+                source.side,
+                source.card_id,
+                unit_spec,
+                spawn_pos,
+                source.secondary_color,
+                deploy_ticks=unit_spec.deploy_ticks,
+            )
             self.entities[entity.entity_id] = entity
 
     def _cast_spell(self, side: str, card: CardSpec, target: Vec2) -> None:
@@ -590,6 +739,39 @@ class GameEngine:
                         entity.hp = max(0, entity.hp - decay)
                 if entity.lifetime_ticks_remaining <= 0:
                     entity.hp = 0
+
+    def _update_spawners(self) -> None:
+        for entity in self._entities_sorted():
+            if not entity.alive or not entity.deployed or not entity.periodic_spawns:
+                continue
+            cooldowns = list(entity.spawn_cooldowns)
+            if len(cooldowns) != len(entity.periodic_spawns):
+                cooldowns = [spawn.initial_delay_ticks for spawn in entity.periodic_spawns]
+
+            for index, spawn in enumerate(entity.periodic_spawns):
+                if spawn.requires_enemy_in_range and not self._enemy_in_spawn_range(entity, spawn):
+                    continue
+                cooldowns[index] -= 1
+                if cooldowns[index] > 0:
+                    continue
+                self._spawn_spawn_spec(entity, spawn)
+                if spawn.period_ticks is None:
+                    cooldowns[index] = 10**9
+                    continue
+                period = max(1, spawn.period_ticks)
+                while cooldowns[index] <= 0:
+                    cooldowns[index] += period
+
+            entity.spawn_cooldowns = tuple(cooldowns)
+
+    def _enemy_in_spawn_range(self, entity: Entity, spawn: SpawnSpec) -> bool:
+        trigger_range = spawn.trigger_range if spawn.trigger_range is not None else entity.sight_range
+        for candidate in self._entities_sorted():
+            if not candidate.alive or candidate.side == entity.side:
+                continue
+            if entity.effective_distance_to(candidate) <= trigger_range:
+                return True
+        return False
 
     def _update_king_activation(self) -> None:
         for side, started_tick in list(self.king_activation_started_tick.items()):
@@ -707,8 +889,12 @@ class GameEngine:
                 splash_radius=attacker.splash_radius,
             )
             self.projectiles[projectile.projectile_id] = projectile
+            if "kamikaze" in attacker.mechanics:
+                attacker.hp = 0
             return
         self._damage_entity(attacker.side, target, attacker.damage, splash_radius=attacker.splash_radius)
+        if "kamikaze" in attacker.mechanics:
+            attacker.hp = 0
         attacker.last_hit_tick = self.tick
 
     def _move_entity(self, entity: Entity, target: Optional[Entity]) -> None:
@@ -830,7 +1016,7 @@ class GameEngine:
             away = Vec2(-move_dir.y, move_dir.x)
         tangent_a = Vec2(-away.y, away.x)
         tangent_b = Vec2(away.y, -away.x)
-        clearance = obstacle.radius + entity.radius + BUILDING_AVOIDANCE_MARGIN
+        clearance = self._pathing_collision_radius(obstacle) + entity.radius + BUILDING_AVOIDANCE_MARGIN
         base = obstacle.pos.add(away.x * clearance, away.y * clearance)
         candidates = [
             base.add(tangent_a.x * clearance, tangent_a.y * clearance),
@@ -853,7 +1039,7 @@ class GameEngine:
                 continue
             if obstacle.pos.distance_to(destination) <= 1e-6:
                 continue
-            inflated = obstacle.radius + entity.radius + 0.2
+            inflated = self._pathing_collision_radius(obstacle) + entity.radius + 0.2
             progress, distance = self._segment_projection(entity.pos, destination, obstacle.pos)
             if 0.0 <= progress <= 1.0 and distance <= inflated:
                 blockers.append((entity.pos.distance_to(obstacle.pos), obstacle))
@@ -861,6 +1047,9 @@ class GameEngine:
             return None
         blockers.sort(key=lambda item: (item[0], item[1].entity_id))
         return blockers[0][1]
+
+    def _pathing_collision_radius(self, obstacle: Entity) -> float:
+        return obstacle.radius
 
     def _segment_projection(self, start: Vec2, end: Vec2, point: Vec2) -> Tuple[float, float]:
         dx = end.x - start.x
@@ -957,8 +1146,11 @@ class GameEngine:
                     nx, ny = (1.0, 0.0) if left.side == SIDE_RED else (-1.0, 0.0)
                 else:
                     nx, ny = dx / length, dy / length
-                left_weight = 0.0 if left.mass == 0 else 1.0 / left.mass
-                right_weight = 0.0 if right.mass == 0 else 1.0 / right.mass
+                
+                MASS_WEIGHT_POWER = 0.5
+
+                left_weight = 0.0 if left.mass == 0 else 1.0 / left.mass ** MASS_WEIGHT_POWER
+                right_weight = 0.0 if right.mass == 0 else 1.0 / right.mass ** MASS_WEIGHT_POWER
                 total = left_weight + right_weight
                 if total <= 0:
                     continue
@@ -1005,6 +1197,10 @@ class GameEngine:
             if entity_id not in self.entities:
                 continue
             entity = self.entities.pop(entity_id)
+            for spawn in entity.death_spawns:
+                if spawn.requires_enemy_in_range and not self._enemy_in_spawn_range(entity, spawn):
+                    continue
+                self._spawn_spawn_spec(entity, spawn)
             if entity.kind == "tower":
                 self._log("%s %s destroyed" % (entity.side, entity.tower_role))
                 if entity.tower_role == "king" or self.tick >= SUDDEN_DEATH_START_TICKS:

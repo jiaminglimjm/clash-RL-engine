@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from .constants import (
     ELIXIR_MILLI,
@@ -12,6 +12,9 @@ from .constants import (
     START_ELIXIR_MILLI,
 )
 from .geometry import Vec2
+
+if TYPE_CHECKING:
+    from .cards import SpawnSpec
 
 
 @dataclass
@@ -40,6 +43,10 @@ class Entity:
     splash_radius: float = 0.0
     first_attack_ticks: Optional[int] = None
     load_time_ticks: Optional[int] = None
+    mechanics: Tuple[str, ...] = ()
+    periodic_spawns: Tuple["SpawnSpec", ...] = ()
+    death_spawns: Tuple["SpawnSpec", ...] = ()
+    spawn_cooldowns: Tuple[int, ...] = ()
     footprint_tiles: float = 0.0
     lifetime_ticks_remaining: Optional[int] = None
     lifetime_ticks_total: Optional[int] = None

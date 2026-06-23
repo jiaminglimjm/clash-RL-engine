@@ -257,8 +257,11 @@ function drawEntity(entity) {
   ctx.strokeStyle = "rgba(255,255,255,0.88)";
   ctx.fillStyle = "#102010";
   const label = entity.kind === "tower" ? String(entity.hp) : entity.label;
-  ctx.strokeText(label, p.x, p.y + radius + 10);
-  ctx.fillText(label, p.x, p.y + radius + 10);
+  const labelY = entity.kind === "tower" && entity.side === "red"
+    ? p.y - radius - 18
+    : p.y + radius + 10;
+  ctx.strokeText(label, p.x, labelY);
+  ctx.fillText(label, p.x, labelY);
 }
 
 function drawFacingArrow(entity, p, radius) {
