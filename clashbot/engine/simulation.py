@@ -22,15 +22,19 @@ from .cards import CARD_SPECS, DEFAULT_DECK, TOWER_SPECS, CardSpec, SpawnSpec, U
 from .constants import (
     ARENA_COLS,
     ARENA_ROWS,
+    DOUBLE_ELIXIR_START_TICKS,
     ENGINE_VERSION,
     KING_ACTIVATION_DELAY_TICKS,
     MATCH_END_TICKS,
+    MELEE_ATTACK_RANGE_FACTOR,
+    MELEE_ATTACK_RANGE_MAX_TILES,
     MULTI_UNIT_SPAWN_STAGGER_TICKS,
     SUDDEN_DEATH_START_TICKS,
     SIDE_BLUE,
     SIDE_RED,
     SIDES,
     TICKS_PER_SECOND,
+    TRIPLE_ELIXIR_START_TICKS,
     TROOP_MOVEMENT_SPEED_FACTOR,
 )
 from .entities import Entity, PlayerState, Projectile, ScheduledCommand, players_snapshot
@@ -405,6 +409,8 @@ class GameEngine:
             "spawnCooldowns": list(entity.spawn_cooldowns),
             "periodicSpawns": [self._spawn_spec_snapshot(spawn) for spawn in entity.periodic_spawns],
             "deathSpawns": [self._spawn_spec_snapshot(spawn) for spawn in entity.death_spawns],
+            "deathDamage": entity.death_damage,
+            "deathSplashRadius": entity.death_splash_radius,
             "secondaryColor": entity.secondary_color,
             "deployTicks": entity.deploy_ticks_remaining,
             "targetId": entity.target_id,
@@ -500,7 +506,7 @@ class GameEngine:
             max_hp=spec.hp,
             damage=spec.damage,
             speed_tiles_per_minute=spec.speed_tiles_per_minute,
-            attack_range=spec.attack_range,
+            attack_range=self._entity_attack_range(spec),
             sight_range=spec.sight_range,
             hit_speed_ticks=spec.hit_speed_ticks,
             deploy_ticks_remaining=spec.deploy_ticks if deploy_ticks is None else deploy_ticks,
@@ -514,6 +520,8 @@ class GameEngine:
             mechanics=spec.mechanics,
             periodic_spawns=spec.periodic_spawns,
             death_spawns=spec.death_spawns,
+            death_damage=spec.death_damage,
+            death_splash_radius=spec.death_splash_radius,
             spawn_cooldowns=tuple(spawn.initial_delay_ticks for spawn in spec.periodic_spawns),
             footprint_tiles=spec.footprint_tiles,
             lifetime_ticks_remaining=spec.lifetime_ticks,
@@ -521,6 +529,15 @@ class GameEngine:
             created_tick=self.tick,
         )
         return entity
+
+    def _entity_attack_range(self, spec: UnitSpec) -> float:
+        if (
+            spec.kind == "troop"
+            and spec.attack_range > 0
+            and spec.attack_range <= MELEE_ATTACK_RANGE_MAX_TILES
+        ):
+            return spec.attack_range * MELEE_ATTACK_RANGE_FACTOR
+        return spec.attack_range
 
     def _allocate_entity_id(self) -> int:
         entity_id = self._next_entity_id
@@ -707,7 +724,9 @@ class GameEngine:
 
     def _current_elixir_multiplier(self) -> int:
         multiplier = self.options.elixir_regen_multiplier
-        if self.tick >= SUDDEN_DEATH_START_TICKS:
+        if self.tick >= TRIPLE_ELIXIR_START_TICKS:
+            multiplier *= 3
+        elif self.tick >= DOUBLE_ELIXIR_START_TICKS:
             multiplier *= 2
         return multiplier
 
@@ -1197,6 +1216,7 @@ class GameEngine:
             if entity_id not in self.entities:
                 continue
             entity = self.entities.pop(entity_id)
+            self._resolve_death_damage(entity)
             for spawn in entity.death_spawns:
                 if spawn.requires_enemy_in_range and not self._enemy_in_spawn_range(entity, spawn):
                     continue
@@ -1210,6 +1230,22 @@ class GameEngine:
             for other in self.entities.values():
                 if other.target_id == entity_id:
                     other.target_id = None
+
+    def _resolve_death_damage(self, source: Entity) -> None:
+        if source.death_damage <= 0 or source.death_splash_radius <= 0:
+            return
+        hit_any = False
+        for entity in self._entities_sorted():
+            if not entity.alive or entity.side == source.side:
+                continue
+            if entity.pos.distance_to(source.pos) <= source.death_splash_radius + entity.radius:
+                self._damage_entity(source.side, entity, source.death_damage)
+                hit_any = True
+        if hit_any:
+            self._log(
+                "%s death damage resolved at %.1f,%.1f"
+                % (source.label, source.pos.x, source.pos.y)
+            )
 
     def _trigger_king_activation(self, side: str) -> None:
         if self.king_activated[side] or self.king_activation_started_tick[side] is not None:

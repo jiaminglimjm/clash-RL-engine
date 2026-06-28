@@ -5,3 +5,5 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+clashbot/data/*.jsonl
+!clashbot/data/.gitkeep

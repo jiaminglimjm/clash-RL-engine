@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ClashBot Two Player</title>
+    <link rel="stylesheet" href="/two/styles.css">
+  </head>
+  <body>
+    <main class="remote-shell" id="remoteShell">
+      <section class="play-area">
+        <header class="match-bar">
+          <div>
+            <div class="match-title" id="matchTitle">Two Player</div>
+            <div class="match-subtitle" id="matchSubtitle">Connecting</div>
+          </div>
+        </header>
+
+        <div class="arena-stack">
+          <canvas id="arena" width="720" height="960" aria-label="Arena"></canvas>
+          <div class="time-left" id="timeLeftBadge">
+            <span class="time-label">Time left:</span>
+            <span class="time-value">3:00</span>
+          </div>
+          <div class="center-overlay" id="centerOverlay"></div>
+        </div>
+
+        <section class="hand-zone">
+          <div class="hand-layout">
+            <div class="hand-sidecar">
+              <button id="emoteBtn" class="emote-button" disabled>Emote</button>
+              <div class="next-label">Next:</div>
+              <div class="next-card" id="nextCard"></div>
+            </div>
+            <div class="hand-row" id="handRow"></div>
+          </div>
+          <div class="elixir-panel">
+            <div class="elixir-bar" id="elixirBar"></div>
+            <div class="elixir-count" id="elixirCount">0</div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="control-panel">
+        <section class="identity-panel">
+          <div class="panel-title">Seats</div>
+          <input id="nameInput" class="name-input" type="text" maxlength="48" autocomplete="name">
+          <div class="join-row">
+            <button id="joinBlueBtn" class="blue-action">Blue</button>
+            <button id="joinRedBtn" class="red-action">Red</button>
+            <button id="spectateBtn">Quit</button>
+          </div>
+          <div class="seat-list">
+            <div class="seat blue-seat" id="blueSeat"></div>
+            <div class="seat red-seat" id="redSeat"></div>
+          </div>
+        </section>
+
+        <section class="deck-panel" id="deckPanel">
+          <div class="panel-title">Deck</div>
+          <div class="deck-slots" id="deckSlots"></div>
+          <div class="hotkey-tip">PC hotkeys: 1-4 select cards in hand.</div>
+          <div class="deck-actions" id="deckActions">
+            <button id="readyBtn">Ready</button>
+            <button id="newLobbyBtn">New Match</button>
+          </div>
+          <div class="catalog" id="cardCatalog"></div>
+        </section>
+
+        <section class="history-panel">
+          <div class="panel-title">Previous Games</div>
+          <div class="history-list" id="historyList"></div>
+        </section>
+
+        <section class="net-panel">
+          <div id="netStatus">Connecting</div>
+          <div id="hashStatus"></div>
+        </section>
+      </aside>
+    </main>
+    <script src="/two/app.js"></script>
+  </body>
+</html>

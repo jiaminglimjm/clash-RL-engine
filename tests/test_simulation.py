@@ -1,12 +1,16 @@
 import unittest
 
 from clashbot.engine.constants import (
+    DOUBLE_ELIXIR_START_TICKS,
     MATCH_END_TICKS,
+    MELEE_ATTACK_RANGE_FACTOR,
+    MELEE_ATTACK_RANGE_MAX_TILES,
     MULTI_UNIT_SPAWN_STAGGER_TICKS,
     SIDE_BLUE,
     SIDE_RED,
     SUDDEN_DEATH_START_TICKS,
     TICKS_PER_SECOND,
+    TRIPLE_ELIXIR_START_TICKS,
     TROOP_MOVEMENT_SPEED_FACTOR,
 )
 from clashbot.engine.cards import CARD_SPECS
@@ -161,6 +165,21 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(fireball["spellCrownTowerDamage"], fireball_spec.crown_tower_damage)
         self.assertEqual(fireball["spellKnockbackTiles"], fireball_spec.knockback_tiles)
 
+    def test_melee_attack_range_factor_applies_to_spawned_troop_entities(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["knight"], Vec2(9.5, 24.5))
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["archers"], Vec2(9.5, 24.5))
+
+        knight_spec = CARD_SPECS["knight"].units[0]
+        archer_spec = CARD_SPECS["archers"].units[0]
+        knight = next(entity for entity in engine.entities.values() if entity.card_id == "knight")
+        archer = next(entity for entity in engine.entities.values() if entity.card_id == "archers")
+
+        self.assertLessEqual(knight_spec.attack_range, MELEE_ATTACK_RANGE_MAX_TILES)
+        self.assertAlmostEqual(knight.attack_range, knight_spec.attack_range * MELEE_ATTACK_RANGE_FACTOR)
+        self.assertAlmostEqual(archer.attack_range, archer_spec.attack_range)
+        self.assertEqual(knight_spec.attack_range, 1.2)
+
     def test_requested_excel_cards_are_registered(self):
         def ticks(seconds):
             return max(1, int(round(seconds * TICKS_PER_SECOND)))
@@ -224,6 +243,90 @@ class SimulationTests(unittest.TestCase):
                     self.assertEqual(unit.load_time_ticks, ticks(load_time_seconds))
                 spawns = engine._expanded_card_unit_spawns(SIDE_BLUE, spec, Vec2(9.5, 24.5))
                 self.assertEqual(len(spawns), count)
+
+    def test_requested_added_retro_cards_are_registered(self):
+        expected_units = {
+            "royal_giant": ("Royal Giant", "troop", 6, 1, "ground", "buildings", 3164, 307, 45, 5.0, 1.7, 1000, 0.0, 18, 0.75, 7.5, 0.7, 1.0),
+            "minion_horde": ("Minion Horde", "troop", 5, 6, "air", "all", 230, 107, 90, 2.5, 1.0, 1000, 0.0, 2, 0.5, 5.5, 0.5, 0.7),
+            "elite_barbarians": ("Elite Barbarians", "troop", 6, 2, "ground", "ground", 1341, 384, 90, 0.8, 1.4, 0, 0.0, 4, 0.5, 5.5, 0.5, 1.0),
+            "hog_rider": ("Hog Rider", "troop", 4, 1, "ground", "buildings", 1697, 317, 120, 0.8, 1.6, 0, 0.0, 4, 0.6, 9.5, 0.6, 1.0),
+            "dart_goblin": ("Dart Goblin", "troop", 3, 1, "ground", "all", 260, 156, 120, 6.5, 0.8, 800, 0.0, 3, 0.5, 7.5, 0.35, 0.35),
+            "pekka": ("P.E.K.K.A", "troop", 7, 1, "ground", "ground", 3760, 816, 45, 1.2, 1.8, 0, 0.0, 18, 0.75, 5.0, 0.5, 1.3),
+            "bomb_tower": ("Bomb Tower", "building", 4, 1, "building", "ground", 1356, 222, 0, 6.0, 1.6, 400, 1.5, 0, 0.6, 5.5, 0.5, 1.1),
+        }
+        engine = self.make_engine()
+        for card_id, values in expected_units.items():
+            with self.subTest(card_id=card_id):
+                (
+                    display_name,
+                    kind,
+                    elixir,
+                    count,
+                    movement_type,
+                    target_mode,
+                    hp,
+                    damage,
+                    speed,
+                    attack_range,
+                    hit_speed_seconds,
+                    projectile_speed,
+                    splash_radius,
+                    mass,
+                    radius,
+                    sight_range,
+                    first_attack_seconds,
+                    load_time_seconds,
+                ) = values
+                spec = CARD_SPECS[card_id]
+                unit = spec.units[0]
+                self.assertEqual(spec.display_name, display_name)
+                self.assertEqual(spec.kind, kind)
+                self.assertEqual(spec.elixir, elixir)
+                self.assertEqual(unit.movement_type, movement_type)
+                self.assertEqual(unit.target_mode, target_mode)
+                self.assertEqual(unit.hp, hp)
+                self.assertEqual(unit.damage, damage)
+                self.assertEqual(unit.speed_tiles_per_minute, speed)
+                self.assertEqual(unit.attack_range, attack_range)
+                self.assertEqual(unit.hit_speed_ticks, self.ticks(hit_speed_seconds))
+                self.assertEqual(unit.projectile_speed_tiles_per_minute, projectile_speed)
+                self.assertEqual(unit.splash_radius, splash_radius)
+                self.assertEqual(unit.mass, mass)
+                self.assertEqual(unit.radius, radius)
+                self.assertEqual(unit.sight_range, sight_range)
+                self.assertEqual(unit.first_attack_ticks, self.ticks(first_attack_seconds))
+                self.assertEqual(unit.load_time_ticks, self.ticks(load_time_seconds))
+                spawns = engine._expanded_card_unit_spawns(SIDE_BLUE, spec, Vec2(9.5, 24.5))
+                self.assertEqual(len(spawns), count)
+
+        goblin_gang = CARD_SPECS["goblin_gang"]
+        self.assertEqual(goblin_gang.display_name, "Goblin Gang")
+        self.assertEqual(goblin_gang.elixir, 3)
+        self.assertEqual(len(goblin_gang.units), 6)
+        self.assertEqual([unit.unit_id for unit in goblin_gang.units].count("goblin"), 3)
+        self.assertEqual([unit.unit_id for unit in goblin_gang.units].count("spear_goblin"), 3)
+
+        rocket = CARD_SPECS["rocket"]
+        self.assertEqual(rocket.kind, "spell")
+        self.assertEqual(rocket.elixir, 6)
+        assert rocket.spell is not None
+        self.assertEqual(rocket.spell.damage, 1484)
+        self.assertEqual(rocket.spell.crown_tower_damage, 445)
+        self.assertEqual(rocket.spell.radius, 2.0)
+        self.assertEqual(rocket.spell.projectile_speed_tiles_per_minute, 350)
+        self.assertEqual(rocket.spell.knockback_tiles, 1.8)
+
+    def test_bomb_tower_death_bomb_damages_enemies(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["bomb_tower"], Vec2(9.5, 24.5))
+        engine._spawn_card_units(SIDE_RED, CARD_SPECS["knight"], Vec2(9.5, 22.5))
+        tower = next(entity for entity in engine.entities.values() if entity.card_id == "bomb_tower")
+        knight = next(entity for entity in engine.entities.values() if entity.side == SIDE_RED and entity.card_id == "knight")
+
+        engine._damage_entity(SIDE_RED, tower, tower.hp)
+        engine._cleanup_dead()
+
+        self.assertEqual(knight.hp, knight.max_hp - CARD_SPECS["bomb_tower"].units[0].death_damage)
 
     def test_fire_spirit_self_destructs_after_launching_attack(self):
         engine = self.make_engine()
@@ -472,15 +575,16 @@ class SimulationTests(unittest.TestCase):
         engine.step(120)
         self.assertEqual(red_king.target_id, giant.entity_id)
 
-    def test_double_elixir_starts_at_sudden_death(self):
+    def test_elixir_multiplier_phases_match_regulation_and_overtime(self):
         engine = self.make_engine()
-        blue = engine.players[SIDE_BLUE]
-        blue.elixir_milli = 0
-        engine.tick = SUDDEN_DEATH_START_TICKS - 1
-        engine.step()
-        before = blue.elixir_milli
-        engine.step()
-        self.assertGreater(blue.elixir_milli - before, before)
+        engine.tick = DOUBLE_ELIXIR_START_TICKS - 1
+        self.assertEqual(engine._current_elixir_multiplier(), 1)
+        engine.tick = DOUBLE_ELIXIR_START_TICKS
+        self.assertEqual(engine._current_elixir_multiplier(), 2)
+        engine.tick = SUDDEN_DEATH_START_TICKS
+        self.assertEqual(engine._current_elixir_multiplier(), 2)
+        engine.tick = TRIPLE_ELIXIR_START_TICKS
+        self.assertEqual(engine._current_elixir_multiplier(), 3)
 
     def test_sudden_death_any_tower_destroyed_wins(self):
         engine = self.make_engine()

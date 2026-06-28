@@ -25,6 +25,16 @@ python3 -m clashbot.debug_server --host 127.0.0.1 --port 8000
 
 Open `http://localhost:8000`.
 
+Two-player remote debug mode is served by the same process:
+
+```bash
+python3 -m clashbot.debug_server --host 0.0.0.0 --port 8000
+```
+
+Open `http://<server-ip>:8000/two/`. The two-player mode keeps the simulator server-authoritative, starts only after both seats are ready, supports reconnecting by browser token, and writes completed match summaries to `clashbot/data/two_player_games.jsonl` by default. Card pictures can be dropped into `clashbot/web/two/card-art/` as `<card_id>.webp`, `.png`, `.jpg`, or `.jpeg`.
+
+For a Raspberry Pi, prefer running the Python server on an unprivileged port such as `8000` or `8080` and forwarding port 80 with a reverse proxy or firewall rule. Binding Python directly to port 80 usually requires root or extra capabilities.
+
 The engine package is intentionally split by responsibility:
 
 - `clashbot.engine.arena`: tile classification, placement legality, bridge helpers.
@@ -32,4 +42,3 @@ The engine package is intentionally split by responsibility:
 - `clashbot.engine.simulation`: deterministic authoritative tick loop.
 - `clashbot.engine.replay`: compact replay format.
 - `clashbot.debug_server`: stdlib HTTP server for human-in-the-loop checking.
-
