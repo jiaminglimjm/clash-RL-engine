@@ -311,7 +311,7 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(rocket.elixir, 6)
         assert rocket.spell is not None
         self.assertEqual(rocket.spell.damage, 1484)
-        self.assertEqual(rocket.spell.crown_tower_damage, 445)
+        self.assertEqual(rocket.spell.crown_tower_damage, 342)
         self.assertEqual(rocket.spell.radius, 2.0)
         self.assertEqual(rocket.spell.projectile_speed_tiles_per_minute, 350)
         self.assertEqual(rocket.spell.knockback_tiles, 1.8)

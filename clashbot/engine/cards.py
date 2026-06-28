@@ -295,8 +295,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 deploy_ticks=_ticks(1.0),
                 mass=2,
                 radius=0.4,
-                first_attack_ticks=_ticks(0.5),
-                load_time_ticks=_ticks(0.5),
+                first_attack_ticks=_ticks(0.2),
+                load_time_ticks=_ticks(0.9),
             ),
         ),
         formation=(
@@ -652,7 +652,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
         spell=SpellSpec(
             spell_id="rocket",
             damage=1484,
-            crown_tower_damage=445,
+            crown_tower_damage=342,
             radius=2.0,
             projectile_speed_tiles_per_minute=350,
             knockback_tiles=1.8,
@@ -895,8 +895,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 deploy_ticks=_ticks(1.0),
                 mass=4,
                 radius=0.6,
-                first_attack_ticks=_ticks(0.6),
-                load_time_ticks=_ticks(1.0),
+                first_attack_ticks=_ticks(0.5),
+                load_time_ticks=_ticks(1.1),
                 mechanics=("river_jump",),
             ),
         ),
@@ -944,8 +944,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 kind="troop",
                 movement_type="ground",
                 target_mode="all",
-                hp=260,
-                damage=156,
+                hp=261,
+                damage=151,
                 speed_tiles_per_minute=120,
                 attack_range=6.5,
                 sight_range=7.5,
@@ -1151,26 +1151,26 @@ CARD_SPECS: Dict[str, CardSpec] = {
     ),
 }
 
-DEFAULT_DECK = (
-    "knight",
-    "musketeer",
-    "minions",
-    "giant",
-    "cannon",
-    "fireball",
-    "archers",
-    "mini_pekka",
-)
 # DEFAULT_DECK = (
-#     "goblins",
-#     "barbarians",
-#     "witch",
-#     "bats",
-#     "tombstone",
-#     "bomber",
-#     "spear_goblins",
+#     "knight",
+#     "musketeer",
 #     "minions",
+#     "giant",
+#     "cannon",
+#     "fireball",
+#     "archers",
+#     "mini_pekka",
 # )
+DEFAULT_DECK = (
+    "hog_rider",
+    "elite_barbarians",
+    "royal_giant",
+    "minion_horde",
+    "goblin_gang",
+    "witch",
+    "goblins",
+    "bats",
+)
 
 TOWER_SPECS: Dict[str, UnitSpec] = {
     "king": UnitSpec(

@@ -34,6 +34,15 @@ EXPECTED_NAKED_BRIDGE = {
     "giant": {"princess_hp": 0, "king_hp": 4571},
     "musketeer": {"princess_hp": 1967, "princess_hits": 5},
     "fireball": {"princess_hp": 2880},
+    "royal_giant": {"princess_hp": 0, "king_hp": 4517},
+    "minion_horde": {"princess_hp": 163},
+    "goblin_gang": {"princess_hp": 1960},
+    "elite_barbarians": {"princess_hp": 0, "king_hp": 2520},
+    "hog_rider": {"princess_hp": 833},
+    "dart_goblin": {"princess_hp": 2599},
+    "pekka": {"princess_hp": 0, "king_hp": 1560},
+    "rocket": {"princess_hp": 2710},
+    "bomb_tower": {"princess_hp": 3052},
 }
 
 
@@ -96,6 +105,24 @@ class NakedBridgeBenchmarkTests(unittest.TestCase):
         self.assertGreaterEqual(actual["princess_hp"], 0)
         self.assertLessEqual(actual["princess_hp"], 3052)
         self.assertGreater(actual["princess_hits"], 0)
+
+    def test_added_retro_cards_naked_bridge_harness_smoke(self):
+        for card_id in (
+            "royal_giant",
+            "minion_horde",
+            "goblin_gang",
+            "elite_barbarians",
+            "hog_rider",
+            "dart_goblin",
+            "pekka",
+            "rocket",
+            "bomb_tower",
+        ):
+            with self.subTest(card_id=card_id):
+                actual = run_naked_bridge(card_id)
+                self.assertGreaterEqual(actual["princess_hp"], 0)
+                self.assertLessEqual(actual["princess_hp"], 3052)
+                self.assertGreater(actual["ticks"], 0)
 
 
 if __name__ == "__main__":
