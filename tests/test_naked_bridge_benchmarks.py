@@ -12,6 +12,9 @@ BENCHMARK_REPORT_MODE = os.environ.get("CLASHBOT_NAKED_BRIDGE_REPORT", "").lower
 
 BRIDGE_LEFT = Vec2(3.5, 17.5)
 RED_LEFT_PRINCESS = Vec2(3.5, 6.5)
+OLD_NAKED_BRIDGE_CUTOFF_TICKS = 2400
+NAKED_BRIDGE_MAX_TICKS = OLD_NAKED_BRIDGE_CUTOFF_TICKS
+PRINCESS_NAKED_BRIDGE_MAX_TICKS = SUDDEN_DEATH_START_TICKS
 
 
 EXPECTED_NAKED_BRIDGE = {
@@ -61,7 +64,15 @@ EXPECTED_NAKED_BRIDGE = {
 }
 
 
-def run_naked_bridge(card_id, max_ticks=SUDDEN_DEATH_START_TICKS):
+def naked_bridge_max_ticks(card_id):
+    if card_id == "princess":
+        return PRINCESS_NAKED_BRIDGE_MAX_TICKS
+    return NAKED_BRIDGE_MAX_TICKS
+
+
+def run_naked_bridge(card_id, max_ticks=None):
+    if max_ticks is None:
+        max_ticks = naked_bridge_max_ticks(card_id)
     engine = GameEngine(options=GameOptions(placement_delay_ticks=0))
     card = CARD_SPECS[card_id]
 
@@ -123,8 +134,8 @@ def naked_bridge_report(outcomes, failed_only=False):
     failed = sum(1 for outcome in outcomes if outcome["mismatches"])
     passed = total - failed
     lines = [
-        "Naked bridge benchmark: %d passed, %d failed, %d total"
-        % (passed, failed, total)
+        "Naked bridge benchmark: %d passed, %d failed, %d total, max_ticks=%d, princess_max_ticks=%d"
+        % (passed, failed, total, NAKED_BRIDGE_MAX_TICKS, PRINCESS_NAKED_BRIDGE_MAX_TICKS)
     ]
     for outcome in outcomes:
         if failed_only and not outcome["mismatches"]:
@@ -170,6 +181,13 @@ class NakedBridgeBenchmarkTests(unittest.TestCase):
         self.assertGreaterEqual(actual["princess_hp"], 0)
         self.assertLessEqual(actual["princess_hp"], 3052)
         self.assertGreater(actual["princess_hits"], 0)
+
+    def test_princess_benchmark_runs_past_old_cutoff(self):
+        actual = run_naked_bridge("princess")
+        self.assertGreater(actual["ticks"], OLD_NAKED_BRIDGE_CUTOFF_TICKS)
+        self.assertLessEqual(actual["ticks"], PRINCESS_NAKED_BRIDGE_MAX_TICKS)
+        self.assertEqual(actual["princess_hp"], 0)
+        self.assertEqual(actual["king_hp"], 0)
 
     def test_added_retro_cards_naked_bridge_harness_smoke(self):
         for card_id in (

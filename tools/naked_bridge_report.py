@@ -28,7 +28,7 @@ def _format_pair(actual: int, expected: Optional[int]) -> str:
     return "%d / %d" % (actual, expected)
 
 
-def _build_rows(card_ids: Iterable[str], max_ticks: int) -> List[Dict]:
+def _build_rows(card_ids: Iterable[str], max_ticks: Optional[int]) -> List[Dict]:
     benchmarks = _load_benchmarks()
     rows = []
     for card_id in card_ids:
@@ -106,7 +106,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Print naked-at-bridge benchmark results without unittest assertions."
     )
-    parser.add_argument("--max-ticks", type=int, default=2400)
+    parser.add_argument(
+        "--max-ticks",
+        type=int,
+        default=None,
+        help="override the per-card tick cap; by default princess gets a longer cap",
+    )
     parser.add_argument("--strict", action="store_true", help="exit 1 when any expected metric mismatches")
     parser.add_argument(
         "cards",

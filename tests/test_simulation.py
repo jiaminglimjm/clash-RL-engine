@@ -39,7 +39,7 @@ class SimulationTests(unittest.TestCase):
         raise AssertionError("expected at least one troop/building in hand")
 
     def test_play_card_spends_elixir_and_cycles_hand(self):
-        engine = self.make_engine()
+        engine = self.make_engine(blue_deck=STARTER_DECK)
         initial_hand = list(engine.players[SIDE_BLUE].hand())
         expected_replacement = engine.players[SIDE_BLUE].deck[engine.players[SIDE_BLUE].order[4]]
         hand_slot, card_id = self.first_troop_slot(engine)

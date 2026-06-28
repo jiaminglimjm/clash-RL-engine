@@ -17,6 +17,10 @@ let selected = null;
 let hoverWorld = null;
 let paused = false;
 let lastHandsKey = "";
+let spaceSpeedHeld = false;
+let requestedDebugSpeedMultiplier = 1;
+let lastSentDebugSpeedMultiplier = 1;
+let speedRequestInFlight = false;
 
 const sideColor = {
   blue: "#2867d8",
@@ -379,7 +383,8 @@ function renderPanel() {
   clockEl.textContent = `t=${state.tick}  ${state.seconds.toFixed(1)}s`;
   blueElixirEl.textContent = `Blue ${state.players.blue.elixir.toFixed(1)}`;
   redElixirEl.textContent = `Red ${state.players.red.elixir.toFixed(1)}`;
-  netlineEl.textContent = `lat ${state.net.simulatedLatencyTicks}  place ${state.net.placementDelayTicks}  sync ${state.net.lockstepDelayTicks}`;
+  const debugSpeed = state.debug && state.debug.speedMultiplier ? state.debug.speedMultiplier : 1;
+  netlineEl.textContent = `lat ${state.net.simulatedLatencyTicks}  place ${state.net.placementDelayTicks}  sync ${state.net.lockstepDelayTicks}  speed ${debugSpeed}x`;
   if (state.game && state.game.over) {
     statusEl.textContent = state.game.winner ? `${capitalize(state.game.winner)} wins` : "Draw";
   } else if (state.game && state.game.phase === "sudden_death") {
@@ -485,6 +490,41 @@ async function postJson(url, payload) {
   renderPanel();
 }
 
+function isInteractiveTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName);
+}
+
+function requestDebugSpeedMultiplier(multiplier, force = false) {
+  requestedDebugSpeedMultiplier = multiplier;
+  if (force) lastSentDebugSpeedMultiplier = 0;
+  sendPendingDebugSpeed();
+}
+
+async function sendPendingDebugSpeed() {
+  if (speedRequestInFlight || lastSentDebugSpeedMultiplier === requestedDebugSpeedMultiplier) return;
+  speedRequestInFlight = true;
+  const target = requestedDebugSpeedMultiplier;
+  try {
+    await postJson("/api/speed", { multiplier: target });
+  } catch (error) {
+    netlineEl.textContent = String(error);
+  } finally {
+    lastSentDebugSpeedMultiplier = target;
+    speedRequestInFlight = false;
+    if (lastSentDebugSpeedMultiplier !== requestedDebugSpeedMultiplier) {
+      sendPendingDebugSpeed();
+    }
+  }
+}
+
+function releaseDebugSpeed() {
+  if (!spaceSpeedHeld && requestedDebugSpeedMultiplier === 1) return;
+  spaceSpeedHeld = false;
+  requestDebugSpeedMultiplier(1, true);
+}
+
 canvas.addEventListener("click", async event => {
   const selectedCard = getSelectedCard();
   if (!state || !selectedCard) return;
@@ -507,11 +547,32 @@ canvas.addEventListener("mouseleave", () => {
 });
 
 document.addEventListener("keydown", event => {
-  if (event.target && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+  if (isInteractiveTarget(event.target)) return;
+  if (event.code === "Space") {
+    event.preventDefault();
+    if (!spaceSpeedHeld) {
+      spaceSpeedHeld = true;
+      requestDebugSpeedMultiplier(2);
+    }
+    return;
+  }
   const key = Number(event.key);
   if (!Number.isInteger(key) || key < 1 || key > 8) return;
   if (key <= 4) selectCard("blue", key - 1);
   else selectCard("red", key - 5);
+});
+
+document.addEventListener("keyup", event => {
+  if (event.code !== "Space") return;
+  if (!spaceSpeedHeld && requestedDebugSpeedMultiplier === 1) return;
+  event.preventDefault();
+  releaseDebugSpeed();
+});
+
+window.addEventListener("blur", releaseDebugSpeed);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) releaseDebugSpeed();
 });
 
 pauseBtn.addEventListener("click", async () => {
@@ -526,6 +587,9 @@ stepBtn.addEventListener("click", async () => {
 
 resetBtn.addEventListener("click", async () => {
   selected = null;
+  spaceSpeedHeld = false;
+  requestedDebugSpeedMultiplier = 1;
+  lastSentDebugSpeedMultiplier = 1;
   await postJson("/api/reset", {});
 });
 

@@ -22,10 +22,15 @@ WEB_ROOT = Path(__file__).resolve().parent / "web"
 class DebugRuntime:
     def __init__(self) -> None:
         self.lock = threading.RLock()
-        self.engine = GameEngine()
+        self.options = GameOptions(shuffle_initial_hands=False)
+        self.engine = self._new_engine()
         self.paused = False
+        self.speed_multiplier = 1
         self.running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def _new_engine(self) -> GameEngine:
+        return GameEngine(options=self.options)
 
     def start(self) -> None:
         self._thread.start()
@@ -36,13 +41,22 @@ class DebugRuntime:
 
     def reset(self) -> Dict:
         with self.lock:
-            self.engine = GameEngine()
+            self.engine = self._new_engine()
             self.paused = False
-            return self.engine.snapshot()
+            self.speed_multiplier = 1
+            return self._snapshot_unlocked()
 
     def snapshot(self) -> Dict:
         with self.lock:
-            return self.engine.snapshot()
+            return self._snapshot_unlocked()
+
+    def _snapshot_unlocked(self) -> Dict:
+        snapshot = self.engine.snapshot()
+        snapshot["debug"] = {
+            "paused": self.paused,
+            "speedMultiplier": self.speed_multiplier,
+        }
+        return snapshot
 
     def play(self, payload: Dict) -> Dict:
         with self.lock:
@@ -57,18 +71,30 @@ class DebugRuntime:
                 "queued": True,
                 "executeTick": command.execute_tick,
                 "sequence": command.sequence,
-                "state": self.engine.snapshot(),
+                "state": self._snapshot_unlocked(),
             }
 
     def set_pause(self, paused: bool) -> Dict:
         with self.lock:
             self.paused = paused
-            return {"paused": self.paused, "state": self.engine.snapshot()}
+            return {"paused": self.paused, "state": self._snapshot_unlocked()}
+
+    def set_speed_multiplier(self, multiplier: object) -> Dict:
+        with self.lock:
+            try:
+                value = float(multiplier)
+            except (TypeError, ValueError):
+                value = 1.0
+            self.speed_multiplier = 2 if value >= 2 else 1
+            return {
+                "speedMultiplier": self.speed_multiplier,
+                "state": self._snapshot_unlocked(),
+            }
 
     def step_once(self) -> Dict:
         with self.lock:
             self.engine.step()
-            return self.engine.snapshot()
+            return self._snapshot_unlocked()
 
     def replay(self) -> Dict:
         with self.lock:
@@ -82,7 +108,7 @@ class DebugRuntime:
             if now >= next_time:
                 with self.lock:
                     if not self.paused:
-                        self.engine.step()
+                        self.engine.step(self.speed_multiplier)
                 next_time += frame_time
                 if next_time < now - frame_time:
                     next_time = now + frame_time
@@ -128,6 +154,8 @@ def make_handler(runtime: DebugRuntime, two_runtime: TwoPlayerRuntime):
                     self._send_json(runtime.reset())
                 elif path == "/api/pause":
                     self._send_json(runtime.set_pause(bool(payload.get("paused"))))
+                elif path == "/api/speed":
+                    self._send_json(runtime.set_speed_multiplier(payload.get("multiplier")))
                 elif path == "/api/step":
                     self._send_json(runtime.step_once())
                 elif path == "/api/two/join":
