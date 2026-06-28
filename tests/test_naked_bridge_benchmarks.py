@@ -2,12 +2,13 @@ import os
 import unittest
 
 from clashbot.engine.cards import CARD_SPECS
-from clashbot.engine.constants import SIDE_BLUE, SIDE_RED
+from clashbot.engine.constants import SIDE_BLUE, SIDE_RED, SUDDEN_DEATH_START_TICKS
 from clashbot.engine.geometry import Vec2
 from clashbot.engine.simulation import GameEngine, GameOptions
 
 
 RUN_BALANCE_BENCHMARKS = os.environ.get("CLASHBOT_RUN_BALANCE_BENCHMARKS") == "1"
+BENCHMARK_REPORT_MODE = os.environ.get("CLASHBOT_NAKED_BRIDGE_REPORT", "").lower()
 
 BRIDGE_LEFT = Vec2(3.5, 17.5)
 RED_LEFT_PRINCESS = Vec2(3.5, 6.5)
@@ -43,10 +44,24 @@ EXPECTED_NAKED_BRIDGE = {
     "pekka": {"princess_hp": 0, "king_hp": 1560},
     "rocket": {"princess_hp": 2710},
     "bomb_tower": {"princess_hp": 3052},
+    "baby_dragon": {"princess_hp": 2247},
+    "flying_machine": {"princess_hp": 2368},
+    "princess": {"princess_hp": 0, "king_hp": 0},
+    "elixir_collector": {"princess_hp": 3052},
+    "mirror": {"princess_hp": 3052},
+    "night_witch": {"princess_hp": 1300},
+    "skeleton_army": {"princess_hp": 541},
+    "goblin_barrel": {"princess_hp": 2212},
+    "balloon": {"princess_hp": 252},
+    "lightning": {"princess_hp": 2787},
+    "arrows": {"princess_hp": 2977},
+    "zap": {"princess_hp": 3004},
+    "golem": {"princess_hp": 0, "king_hp": 3669},
+    "lava_hound": {"princess_hp": 1260},
 }
 
 
-def run_naked_bridge(card_id, max_ticks=2400):
+def run_naked_bridge(card_id, max_ticks=SUDDEN_DEATH_START_TICKS):
     engine = GameEngine(options=GameOptions(placement_delay_ticks=0))
     card = CARD_SPECS[card_id]
 
@@ -83,6 +98,53 @@ def run_naked_bridge(card_id, max_ticks=2400):
     }
 
 
+def naked_bridge_outcomes():
+    outcomes = []
+    for card_id, expected in EXPECTED_NAKED_BRIDGE.items():
+        actual = run_naked_bridge(card_id)
+        mismatches = {
+            key: {"expected": value, "actual": actual[key]}
+            for key, value in expected.items()
+            if actual[key] != value
+        }
+        outcomes.append(
+            {
+                "card_id": card_id,
+                "expected": expected,
+                "actual": actual,
+                "mismatches": mismatches,
+            }
+        )
+    return outcomes
+
+
+def naked_bridge_report(outcomes, failed_only=False):
+    total = len(outcomes)
+    failed = sum(1 for outcome in outcomes if outcome["mismatches"])
+    passed = total - failed
+    lines = [
+        "Naked bridge benchmark: %d passed, %d failed, %d total"
+        % (passed, failed, total)
+    ]
+    for outcome in outcomes:
+        if failed_only and not outcome["mismatches"]:
+            continue
+        status = "FAIL" if outcome["mismatches"] else "PASS"
+        parts = [
+            "%s %s" % (status, outcome["card_id"]),
+            "expected=%s" % outcome["expected"],
+            "actual={princess_hp:%s, king_hp:%s, ticks:%s}" % (
+                outcome["actual"]["princess_hp"],
+                outcome["actual"]["king_hp"],
+                outcome["actual"]["ticks"],
+            ),
+        ]
+        if outcome["mismatches"]:
+            parts.append("mismatches=%s" % outcome["mismatches"])
+        lines.append(" | ".join(parts))
+    return "\n".join(lines)
+
+
 def tower_hp(engine, role):
     tower = engine._tower_entity(SIDE_RED, role)
     return tower.hp if tower is not None else 0
@@ -94,11 +156,14 @@ class NakedBridgeBenchmarkTests(unittest.TestCase):
         "set CLASHBOT_RUN_BALANCE_BENCHMARKS=1 to run balance calibration benchmarks",
     )
     def test_naked_at_bridge_expected_princess_tower_damage(self):
-        for card_id, expected in EXPECTED_NAKED_BRIDGE.items():
-            with self.subTest(card_id=card_id):
-                actual = run_naked_bridge(card_id)
-                for key, value in expected.items():
-                    self.assertEqual(actual[key], value, actual)
+        outcomes = naked_bridge_outcomes()
+        if BENCHMARK_REPORT_MODE in ("all", "failed", "failures", "failed-only"):
+            failed_only = BENCHMARK_REPORT_MODE in ("failed", "failures", "failed-only")
+            print("\n" + naked_bridge_report(outcomes, failed_only=failed_only))
+            return
+        for outcome in outcomes:
+            with self.subTest(card_id=outcome["card_id"]):
+                self.assertEqual(outcome["mismatches"], {}, outcome)
 
     def test_naked_bridge_benchmark_harness_smoke(self):
         actual = run_naked_bridge("mini_pekka")
@@ -117,6 +182,20 @@ class NakedBridgeBenchmarkTests(unittest.TestCase):
             "pekka",
             "rocket",
             "bomb_tower",
+            "baby_dragon",
+            "flying_machine",
+            "princess",
+            "elixir_collector",
+            "mirror",
+            "night_witch",
+            "skeleton_army",
+            "goblin_barrel",
+            "balloon",
+            "lightning",
+            "arrows",
+            "zap",
+            "golem",
+            "lava_hound",
         ):
             with self.subTest(card_id=card_id):
                 actual = run_naked_bridge(card_id)

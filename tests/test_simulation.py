@@ -347,6 +347,129 @@ class SimulationTests(unittest.TestCase):
 
         self.assertEqual(knight.hp, knight.max_hp - CARD_SPECS["bomb_tower"].units[0].death_damage)
 
+    def test_requested_second_wave_cards_are_registered(self):
+        expected = {
+            "baby_dragon": ("Baby Dragon", "troop", 4, 1),
+            "flying_machine": ("Flying Machine", "troop", 4, 1),
+            "princess": ("Princess", "troop", 3, 1),
+            "elixir_collector": ("Elixir Collector", "building", 6, 1),
+            "mirror": ("Mirror", "spell", 1, 0),
+            "night_witch": ("Night Witch", "troop", 4, 1),
+            "skeleton_army": ("Skeleton Army", "troop", 3, 15),
+            "goblin_barrel": ("Goblin Barrel", "spell", 3, 3),
+            "balloon": ("Balloon", "troop", 5, 1),
+            "lightning": ("Lightning", "spell", 6, 0),
+            "arrows": ("Arrows", "spell", 3, 0),
+            "zap": ("Zap", "spell", 2, 0),
+            "golem": ("Golem", "troop", 8, 1),
+            "lava_hound": ("Lava Hound", "troop", 7, 1),
+        }
+        engine = self.make_engine()
+        for card_id, (name, kind, elixir, count) in expected.items():
+            with self.subTest(card_id=card_id):
+                spec = CARD_SPECS[card_id]
+                self.assertEqual(spec.display_name, name)
+                self.assertEqual(spec.kind, kind)
+                self.assertEqual(spec.elixir, elixir)
+                if count > 0:
+                    spawns = engine._expanded_card_unit_spawns(SIDE_BLUE, spec, Vec2(9.5, 24.5))
+                    self.assertEqual(len(spawns), count)
+                else:
+                    self.assertEqual(len(spec.units), 0)
+
+    def test_mirror_replays_previous_card_with_buffed_stats(self):
+        deck = ("knight", "mirror", "archers", "minions", "cannon", "giant", "musketeer", "mini_pekka")
+        engine = self.make_engine(blue_deck=deck)
+
+        engine.submit_play(SIDE_BLUE, 0, 9.5, 24.5)
+        engine.step()
+        self.assertEqual(engine.players[SIDE_BLUE].last_played_card_id, "knight")
+
+        engine.submit_play(SIDE_BLUE, 1, 10.5, 24.5)
+        engine.step()
+
+        knights = [entity for entity in engine.entities.values() if entity.card_id == "knight"]
+        self.assertEqual(sorted(entity.max_hp for entity in knights), [1766, 1943])
+        self.assertEqual(sorted(entity.damage for entity in knights), [202, 222])
+
+    def test_goblin_barrel_spawns_goblins_on_arrival(self):
+        engine = self.make_engine()
+        engine._cast_spell(SIDE_BLUE, CARD_SPECS["goblin_barrel"], Vec2(9.5, 10.5))
+        engine.step(95)
+
+        goblins = [
+            entity for entity in engine.entities.values()
+            if entity.card_id == "goblin_barrel" and entity.unit_id == "goblin"
+        ]
+        self.assertEqual(len(goblins), 3)
+
+    def test_lightning_warns_then_hits_three_highest_hp_targets(self):
+        engine = self.make_engine()
+        for card_id, pos in (
+            ("giant", Vec2(8.8, 10.5)),
+            ("knight", Vec2(9.5, 10.5)),
+            ("musketeer", Vec2(10.2, 10.5)),
+            ("skeletons", Vec2(9.5, 11.2)),
+        ):
+            engine._spawn_card_units(SIDE_RED, CARD_SPECS[card_id], pos)
+        entities = {entity.unit_id: entity for entity in engine.entities.values() if entity.side == SIDE_RED}
+        giant_hp = entities["giant"].hp
+        skeleton_hp = next(entity for entity in engine.entities.values() if entity.unit_id == "skeleton").hp
+
+        engine._cast_spell(SIDE_BLUE, CARD_SPECS["lightning"], Vec2(9.5, 10.5))
+        engine.step(self.ticks(0.5) - 1)
+        self.assertEqual(entities["giant"].hp, giant_hp)
+        projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "lightning")
+        self.assertFalse(projectile.effect_done)
+
+        engine.step(2)
+        self.assertLess(entities["giant"].hp, giant_hp)
+        self.assertEqual(next(entity for entity in engine.entities.values() if entity.unit_id == "skeleton").hp, skeleton_hp)
+        projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "lightning")
+        self.assertTrue(projectile.effect_done)
+        self.assertEqual(len(projectile.visual_targets), 3)
+
+    def test_zap_resolves_immediately(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_RED, CARD_SPECS["knight"], Vec2(9.5, 10.5))
+        knight = next(entity for entity in engine.entities.values() if entity.card_id == "knight")
+
+        engine._cast_spell(SIDE_BLUE, CARD_SPECS["zap"], Vec2(9.5, 10.5))
+
+        self.assertEqual(knight.hp, knight.max_hp - CARD_SPECS["zap"].spell.damage)
+
+    def test_elixir_collector_generates_elixir(self):
+        engine = GameEngine(options=GameOptions(placement_delay_ticks=0, elixir_regen_multiplier=0))
+        engine.players[SIDE_BLUE].elixir_milli = 0
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["elixir_collector"], Vec2(9.5, 24.5))
+        collector = next(entity for entity in engine.entities.values() if entity.card_id == "elixir_collector")
+        collector.deploy_ticks_remaining = 0
+
+        engine.step(self.ticks(13.0))
+
+        self.assertEqual(engine.players[SIDE_BLUE].elixir_milli, 1000)
+
+    def test_golem_and_lava_hound_death_spawns(self):
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["golem"], Vec2(9.5, 24.5))
+        golem = next(entity for entity in engine.entities.values() if entity.card_id == "golem")
+        engine._damage_entity(SIDE_RED, golem, golem.hp)
+        engine._cleanup_dead()
+        self.assertEqual(
+            len([entity for entity in engine.entities.values() if entity.unit_id == "golemite"]),
+            2,
+        )
+
+        engine = self.make_engine()
+        engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["lava_hound"], Vec2(9.5, 24.5))
+        hound = next(entity for entity in engine.entities.values() if entity.card_id == "lava_hound")
+        engine._damage_entity(SIDE_RED, hound, hound.hp)
+        engine._cleanup_dead()
+        self.assertEqual(
+            len([entity for entity in engine.entities.values() if entity.unit_id == "lava_pup"]),
+            6,
+        )
+
     def test_fire_spirit_self_destructs_after_launching_attack(self):
         engine = self.make_engine()
         engine._spawn_card_units(SIDE_BLUE, CARD_SPECS["fire_spirit"], Vec2(9.5, 10.5))

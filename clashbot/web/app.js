@@ -203,6 +203,10 @@ function placementPreviews(meta, side, center) {
 function drawProjectile(projectile) {
   const p = worldToScreen(projectile.x, projectile.y);
   const r = arenaRect();
+  if (projectile.cardId === "lightning") {
+    drawLightningEffect(projectile, p, r);
+    return;
+  }
   ctx.beginPath();
   ctx.arc(p.x, p.y, Math.max(4, projectile.radius * r.tile), 0, Math.PI * 2);
   ctx.fillStyle = projectile.cardId === "fireball" ? "#f47a23" : sideColor[projectile.side];
@@ -210,6 +214,39 @@ function drawProjectile(projectile) {
   ctx.strokeStyle = "rgba(255,255,255,0.9)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
+}
+
+function drawLightningEffect(projectile, center, r) {
+  const radius = Math.max(4, projectile.radius * r.tile);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = projectile.effectDone ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.88)";
+  ctx.lineWidth = projectile.effectDone ? 1.5 : 2;
+  ctx.setLineDash(projectile.effectDone ? [] : [6, 5]);
+  ctx.stroke();
+  ctx.restore();
+
+  if (!projectile.effectDone) return;
+  const targets = projectile.visualTargets || [];
+  for (const target of targets) {
+    const end = worldToScreen(target.x, target.y);
+    ctx.save();
+    ctx.strokeStyle = "#eaf7ff";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(end.x, end.y - r.tile * 2.2);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(94, 197, 255, 0.9)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(end.x - 4, end.y - r.tile * 1.2);
+    ctx.lineTo(end.x + 3, end.y - r.tile * 0.55);
+    ctx.lineTo(end.x - 2, end.y);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function hoveredEntity() {

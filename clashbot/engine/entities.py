@@ -14,7 +14,7 @@ from .constants import (
 from .geometry import Vec2
 
 if TYPE_CHECKING:
-    from .cards import SpawnSpec
+    from .cards import SpawnSpec, UnitSpec
 
 
 @dataclass
@@ -107,6 +107,13 @@ class Projectile:
     knockback_tiles: float = 0.0
     radius: float = 0.12
     ttl_ticks: int = 180
+    mechanics: Tuple[str, ...] = ()
+    delay_ticks: int = 0
+    effect_done: bool = False
+    visual_targets: Tuple[Vec2, ...] = ()
+    spawn_units: Tuple["UnitSpec", ...] = ()
+    spawn_formation: Tuple[Vec2, ...] = (Vec2(0.0, 0.0),)
+    secondary_color: str = "#eeeeee"
 
     @property
     def is_spell(self) -> bool:
@@ -121,6 +128,7 @@ class PlayerState:
     elixir_milli: int = START_ELIXIR_MILLI
     elixir_remainder: int = 0
     next_sequence: int = 1
+    last_played_card_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.order:
@@ -136,6 +144,9 @@ class PlayerState:
 
     def spend(self, elixir: int) -> None:
         self.elixir_milli -= elixir * ELIXIR_MILLI
+
+    def grant_elixir(self, elixir: int) -> None:
+        self.elixir_milli = min(MAX_ELIXIR_MILLI, self.elixir_milli + elixir * ELIXIR_MILLI)
 
     def cycle_slot(self, hand_slot: int) -> None:
         played_index = self.order[hand_slot]
@@ -193,5 +204,6 @@ def players_snapshot(players: Dict[str, PlayerState], card_names: Dict[str, str]
             ],
             "elixir": round(player.elixir_milli / float(ELIXIR_MILLI), 3),
             "elixirMilli": player.elixir_milli,
+            "lastPlayedCardId": player.last_played_card_id,
         }
     return result

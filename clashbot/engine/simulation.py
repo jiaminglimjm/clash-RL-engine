@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import heapq
 import json
@@ -20,7 +20,7 @@ from .arena import (
     tile_type,
     RIVER,
 )
-from .cards import CARD_SPECS, DEFAULT_DECK, TOWER_SPECS, CardSpec, SpawnSpec, UnitSpec
+from .cards import CARD_SPECS, DEFAULT_DECK, TOWER_SPECS, CardSpec, SpawnSpec, SpellSpec, UnitSpec
 from .constants import (
     ARENA_COLS,
     ARENA_ROWS,
@@ -261,6 +261,7 @@ class GameEngine:
                     "order": list(self.players[side].order),
                     "elixir": self.players[side].elixir_milli,
                     "rem": self.players[side].elixir_remainder,
+                    "lastPlayed": self.players[side].last_played_card_id,
                 }
                 for side in SIDES
             },
@@ -306,6 +307,13 @@ class GameEngine:
                     if projectile.target_pos is None
                     else [round(projectile.target_pos.x, 5), round(projectile.target_pos.y, 5)],
                     "ttl": projectile.ttl_ticks,
+                    "delay": projectile.delay_ticks,
+                    "done": projectile.effect_done,
+                    "mechanics": list(projectile.mechanics),
+                    "visualTargets": [
+                        [round(point.x, 5), round(point.y, 5)]
+                        for point in projectile.visual_targets
+                    ],
                 }
                 for projectile in sorted(self.projectiles.values(), key=lambda item: item.projectile_id)
             ],
@@ -462,6 +470,10 @@ class GameEngine:
             "targetPos": None
             if projectile.target_pos is None
             else {"x": projectile.target_pos.x, "y": projectile.target_pos.y},
+            "mechanics": list(projectile.mechanics),
+            "delayTicks": projectile.delay_ticks,
+            "effectDone": projectile.effect_done,
+            "visualTargets": [{"x": point.x, "y": point.y} for point in projectile.visual_targets],
         }
 
     def _spawn_spec_snapshot(self, spawn: SpawnSpec) -> Dict:
@@ -611,8 +623,12 @@ class GameEngine:
             return False
 
         spec = CARD_SPECS[card_id]
+        effective_spec = self._effective_card_for_play(player, spec)
+        if effective_spec is None:
+            self._log("%s Mirror rejected: no previous card" % command.side)
+            return False
         pos = self._snap_placement(Vec2(command.x, command.y))
-        if not self.can_place(command.side, card_id, pos):
+        if not self._can_place_card(command.side, effective_spec, pos):
             self._log("%s %s rejected: invalid placement" % (command.side, spec.display_name))
             return False
         if not player.can_pay(spec.elixir):
@@ -621,10 +637,12 @@ class GameEngine:
 
         player.spend(spec.elixir)
         player.cycle_slot(command.hand_slot)
-        if spec.kind == "spell":
-            self._cast_spell(command.side, spec, pos)
+        if effective_spec.kind == "spell":
+            self._cast_spell(command.side, effective_spec, pos)
         else:
-            self._deploy_card_units(command.side, spec, pos)
+            self._deploy_card_units(command.side, effective_spec, pos)
+        if spec.card_id != "mirror":
+            player.last_played_card_id = spec.card_id
         accepted = ScheduledCommand(
             execute_tick=self.tick,
             sequence=command.sequence,
@@ -638,8 +656,64 @@ class GameEngine:
         )
         if record:
             self.accepted_commands.append(accepted)
-        self._log("%s played %s at %.1f,%.1f" % (command.side, spec.display_name, pos.x, pos.y))
+        if spec.card_id == "mirror":
+            self._log(
+                "%s played Mirror as %s at %.1f,%.1f"
+                % (command.side, effective_spec.display_name, pos.x, pos.y)
+            )
+        else:
+            self._log("%s played %s at %.1f,%.1f" % (command.side, spec.display_name, pos.x, pos.y))
         return True
+
+    def _can_place_card(self, side: str, card: CardSpec, pos: Vec2) -> bool:
+        if not self._placement_tile_allowed(side, card.kind, pos):
+            return False
+        if card.kind == "building":
+            return self._placement_area_allowed(side, card.kind, pos, BUILDING_PLACEMENT_TILES)
+        return True
+
+    def _effective_card_for_play(self, player: PlayerState, spec: CardSpec) -> Optional[CardSpec]:
+        if spec.card_id != "mirror":
+            return spec
+        source_id = player.last_played_card_id
+        if not source_id or source_id == "mirror" or source_id not in CARD_SPECS:
+            return None
+        return self._mirrored_card(CARD_SPECS[source_id])
+
+    def _mirrored_card(self, source: CardSpec) -> CardSpec:
+        units = tuple(self._buff_unit_spec(unit) for unit in source.units)
+        spell = self._buff_spell_spec(source.spell) if source.spell is not None else None
+        return replace(
+            source,
+            display_name="Mirrored %s" % source.display_name,
+            units=units,
+            spell=spell,
+        )
+
+    def _buff_unit_spec(self, unit: UnitSpec) -> UnitSpec:
+        return replace(
+            unit,
+            hp=self._buff_stat(unit.hp),
+            damage=self._buff_stat(unit.damage),
+            death_damage=self._buff_stat(unit.death_damage),
+            periodic_spawns=tuple(self._buff_spawn_spec(spawn) for spawn in unit.periodic_spawns),
+            death_spawns=tuple(self._buff_spawn_spec(spawn) for spawn in unit.death_spawns),
+        )
+
+    def _buff_spawn_spec(self, spawn: SpawnSpec) -> SpawnSpec:
+        return replace(spawn, units=tuple(self._buff_unit_spec(unit) for unit in spawn.units))
+
+    def _buff_spell_spec(self, spell: SpellSpec) -> SpellSpec:
+        return replace(
+            spell,
+            damage=self._buff_stat(spell.damage),
+            crown_tower_damage=self._buff_stat(spell.crown_tower_damage),
+        )
+
+    def _buff_stat(self, value: int) -> int:
+        if value <= 0:
+            return value
+        return int(round(value * 1.1))
 
     def _snap_placement(self, pos: Vec2) -> Vec2:
         row, col = tile_for_world(pos)
@@ -722,9 +796,16 @@ class GameEngine:
     def _cast_spell(self, side: str, card: CardSpec, target: Vec2) -> None:
         if card.spell is None:
             return
+        spell = card.spell
+        if "instant_spell" in spell.mechanics:
+            self._resolve_area_spell(side, card, target)
+            return
+        if "delayed_lightning" in spell.mechanics:
+            self._queue_lightning(side, card, target)
+            return
+
         king = self._king_entity(side)
         start = king.pos if king is not None else Vec2(9.0, 29.0 if side == SIDE_BLUE else 3.0)
-        spell = card.spell
         projectile = Projectile(
             projectile_id=self._allocate_projectile_id(),
             side=side,
@@ -739,6 +820,32 @@ class GameEngine:
             knockback_tiles=spell.knockback_tiles,
             radius=0.22,
             ttl_ticks=180,
+            mechanics=spell.mechanics,
+            spawn_units=card.units,
+            spawn_formation=card.formation,
+            secondary_color=card.secondary_color,
+        )
+        self.projectiles[projectile.projectile_id] = projectile
+
+    def _queue_lightning(self, side: str, card: CardSpec, target: Vec2) -> None:
+        assert card.spell is not None
+        delay_ticks = max(1, int(round(0.5 * TICKS_PER_SECOND)))
+        projectile = Projectile(
+            projectile_id=self._allocate_projectile_id(),
+            side=side,
+            source_card_id=card.card_id,
+            label=card.display_name,
+            pos=target,
+            damage=card.spell.damage,
+            crown_tower_damage=card.spell.crown_tower_damage,
+            speed_tiles_per_minute=0,
+            target_pos=target,
+            splash_radius=card.spell.radius,
+            radius=card.spell.radius,
+            ttl_ticks=delay_ticks + max(1, int(round(0.22 * TICKS_PER_SECOND))),
+            mechanics=card.spell.mechanics,
+            delay_ticks=delay_ticks,
+            secondary_color=card.secondary_color,
         )
         self.projectiles[projectile.projectile_id] = projectile
 
@@ -797,7 +904,11 @@ class GameEngine:
                 cooldowns[index] -= 1
                 if cooldowns[index] > 0:
                     continue
-                self._spawn_spawn_spec(entity, spawn)
+                if "elixir_collector" in entity.mechanics and not spawn.units:
+                    self.players[entity.side].grant_elixir(1)
+                    self._log("%s generated 1 elixir" % entity.label)
+                else:
+                    self._spawn_spawn_spec(entity, spawn)
                 if spawn.period_ticks is None:
                     cooldowns[index] = 10**9
                     continue
@@ -1111,7 +1222,9 @@ class GameEngine:
             if projectile.ttl_ticks <= 0:
                 self.projectiles.pop(projectile.projectile_id, None)
                 continue
-            if projectile.is_spell:
+            if "delayed_lightning" in projectile.mechanics:
+                self._update_delayed_lightning(projectile)
+            elif projectile.is_spell:
                 self._update_spell_projectile(projectile)
             else:
                 self._update_targeted_projectile(projectile)
@@ -1121,8 +1234,42 @@ class GameEngine:
         step_distance = tiles_per_minute_to_tiles_per_tick(projectile.speed_tiles_per_minute, TICKS_PER_SECOND)
         projectile.pos = projectile.pos.moved_toward(projectile.target_pos, step_distance)
         if projectile.pos.distance_to(projectile.target_pos) <= 0.05:
-            self._resolve_area_damage(projectile)
+            if "spawn_on_arrival" in projectile.mechanics:
+                self._spawn_spell_units(projectile)
+            else:
+                self._resolve_area_damage(projectile)
             self.projectiles.pop(projectile.projectile_id, None)
+
+    def _update_delayed_lightning(self, projectile: Projectile) -> None:
+        if projectile.effect_done:
+            return
+        projectile.delay_ticks -= 1
+        if projectile.delay_ticks > 0:
+            return
+        hits = self._resolve_lightning(projectile)
+        projectile.visual_targets = tuple(entity.pos for entity in hits)
+        projectile.effect_done = True
+        projectile.ttl_ticks = max(projectile.ttl_ticks, max(1, int(round(0.22 * TICKS_PER_SECOND))))
+
+    def _spawn_spell_units(self, projectile: Projectile) -> None:
+        if projectile.target_pos is None:
+            return
+        for unit_spec, spawn_pos in self._expanded_unit_spawns(
+            projectile.side,
+            projectile.spawn_units,
+            projectile.spawn_formation,
+            projectile.target_pos,
+        ):
+            entity = self._entity_from_spec(
+                projectile.side,
+                projectile.source_card_id,
+                unit_spec,
+                spawn_pos,
+                projectile.secondary_color,
+                deploy_ticks=unit_spec.deploy_ticks,
+            )
+            self.entities[entity.entity_id] = entity
+        self._log("%s resolved at %.1f,%.1f" % (projectile.label, projectile.target_pos.x, projectile.target_pos.y))
 
     def _update_targeted_projectile(self, projectile: Projectile) -> None:
         target = self.entities.get(projectile.target_id) if projectile.target_id is not None else None
@@ -1136,16 +1283,59 @@ class GameEngine:
             self.projectiles.pop(projectile.projectile_id, None)
 
     def _resolve_area_damage(self, projectile: Projectile) -> None:
-        for entity in self._entities_sorted():
-            if not entity.alive or entity.side == projectile.side:
-                continue
-            if entity.pos.distance_to(projectile.pos) <= projectile.splash_radius + entity.radius:
-                damage = projectile.damage
-                if entity.kind == "tower" and projectile.crown_tower_damage is not None:
-                    damage = projectile.crown_tower_damage
-                self._damage_entity(projectile.side, entity, damage)
-                self._apply_knockback(entity, projectile.pos, projectile.knockback_tiles)
+        for entity in self._targets_in_radius(projectile.side, projectile.pos, projectile.splash_radius):
+            self._damage_spell_target(projectile, entity)
+            self._apply_knockback(entity, projectile.pos, projectile.knockback_tiles)
         self._log("%s resolved at %.1f,%.1f" % (projectile.label, projectile.pos.x, projectile.pos.y))
+
+    def _resolve_area_spell(self, side: str, card: CardSpec, target: Vec2) -> None:
+        if card.spell is None:
+            return
+        projectile = Projectile(
+            projectile_id=self._allocate_projectile_id(),
+            side=side,
+            source_card_id=card.card_id,
+            label=card.display_name,
+            pos=target,
+            damage=card.spell.damage,
+            crown_tower_damage=card.spell.crown_tower_damage,
+            speed_tiles_per_minute=0,
+            target_pos=target,
+            splash_radius=card.spell.radius,
+            knockback_tiles=card.spell.knockback_tiles,
+            mechanics=card.spell.mechanics,
+        )
+        self._resolve_area_damage(projectile)
+
+    def _resolve_lightning(self, projectile: Projectile) -> List[Entity]:
+        candidates = self._targets_in_radius(projectile.side, projectile.pos, projectile.splash_radius)
+        hits = sorted(candidates, key=lambda entity: (-entity.hp, entity.entity_id))[:3]
+        for entity in hits:
+            self._damage_spell_target(projectile, entity)
+            entity.attack_cooldown_ticks = 0
+            entity.attack_windup_target_id = None
+            entity.target_locked = False
+        self._log("%s struck %d targets at %.1f,%.1f" % (projectile.label, len(hits), projectile.pos.x, projectile.pos.y))
+        return hits
+
+    def _targets_in_radius(self, source_side: str, center: Vec2, radius: float) -> List[Entity]:
+        return [
+            entity
+            for entity in self._entities_sorted()
+            if entity.alive
+            and entity.side != source_side
+            and entity.pos.distance_to(center) <= radius + entity.radius
+        ]
+
+    def _damage_spell_target(self, projectile: Projectile, entity: Entity) -> None:
+        damage = projectile.damage
+        if entity.kind == "tower" and projectile.crown_tower_damage is not None:
+            damage = projectile.crown_tower_damage
+        self._damage_entity(projectile.side, entity, damage)
+        if "reset" in projectile.mechanics:
+            entity.attack_cooldown_ticks = 0
+            entity.attack_windup_target_id = None
+            entity.target_locked = False
 
     def _damage_entity(self, source_side: str, target: Entity, amount: int, splash_radius: float = 0.0) -> None:
         if amount <= 0 or not target.alive:
