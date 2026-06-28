@@ -284,7 +284,7 @@ class TwoPlayerRuntime:
         self.match_id = "match-%d-%d" % (self.match_number, int(time.time()))
         self.match_started_at = datetime.now(timezone.utc)
         self.match_started_mono = time.monotonic()
-        self.engine = self._new_engine(seed=self.match_number)
+        self.engine = self._new_engine(seed=secrets.randbits(63))
         self.phase = "running"
         self._bump_locked()
 

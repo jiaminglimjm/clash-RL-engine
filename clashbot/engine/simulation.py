@@ -5,6 +5,8 @@ import hashlib
 import heapq
 import json
 import math
+import random
+import secrets
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from .arena import (
@@ -65,6 +67,7 @@ class GameOptions:
     lockstep_delay_ticks: int = 0
     elixir_regen_multiplier: int = 1
     max_event_log: int = 80
+    shuffle_initial_hands: bool = True
 
 
 class GameEngine:
@@ -73,17 +76,27 @@ class GameEngine:
         blue_deck: Iterable[str] = DEFAULT_DECK,
         red_deck: Iterable[str] = DEFAULT_DECK,
         options: Optional[GameOptions] = None,
-        seed: int = 0,
+        seed: Optional[int] = None,
     ) -> None:
         self.options = options or GameOptions()
-        self.seed = seed
+        self.seed = secrets.randbits(63) if seed is None else seed
         self.tick = 0
         self._next_entity_id = 1
         self._next_projectile_id = 1
         self._next_spawn_sequence = 1
+        blue_deck_tuple = tuple(blue_deck)
+        red_deck_tuple = tuple(red_deck)
         self.players: Dict[str, PlayerState] = {
-            SIDE_BLUE: PlayerState(SIDE_BLUE, tuple(blue_deck)),
-            SIDE_RED: PlayerState(SIDE_RED, tuple(red_deck)),
+            SIDE_BLUE: PlayerState(
+                SIDE_BLUE,
+                blue_deck_tuple,
+                order=self._initial_deck_order(SIDE_BLUE, blue_deck_tuple),
+            ),
+            SIDE_RED: PlayerState(
+                SIDE_RED,
+                red_deck_tuple,
+                order=self._initial_deck_order(SIDE_RED, red_deck_tuple),
+            ),
         }
         self.entities: Dict[int, Entity] = {}
         self.projectiles: Dict[int, Projectile] = {}
@@ -98,6 +111,16 @@ class GameEngine:
         self.ended_tick: Optional[int] = None
         self.end_reason: Optional[str] = None
         self._spawn_initial_towers()
+
+    def _initial_deck_order(self, side: str, deck: Tuple[str, ...]) -> List[int]:
+        order = list(range(len(deck)))
+        if not self.options.shuffle_initial_hands or len(order) <= 1:
+            return order
+        seed_material = "%s:%s:%s" % (self.seed, side, ",".join(deck))
+        seed_bytes = hashlib.sha256(seed_material.encode("utf-8")).digest()
+        rng = random.Random(int.from_bytes(seed_bytes[:16], "big"))
+        rng.shuffle(order)
+        return order
 
     @classmethod
     def from_replay(cls, replay: CompactReplay, options: Optional[GameOptions] = None) -> "GameEngine":

@@ -125,6 +125,8 @@ class PlayerState:
     def __post_init__(self) -> None:
         if not self.order:
             self.order = list(range(len(self.deck)))
+        else:
+            self.order = list(self.order)
 
     def hand(self) -> List[str]:
         return [self.deck[index] for index in self.order[:4]]

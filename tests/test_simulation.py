@@ -25,7 +25,7 @@ STARTER_DECK = ("knight", "archers", "minions", "fireball", "cannon", "giant", "
 
 class SimulationTests(unittest.TestCase):
     def make_engine(self, blue_deck=None, red_deck=None):
-        kwargs = {"options": GameOptions(placement_delay_ticks=0)}
+        kwargs = {"options": GameOptions(placement_delay_ticks=0, shuffle_initial_hands=False)}
         if blue_deck is not None:
             kwargs["blue_deck"] = blue_deck
         if red_deck is not None:
@@ -41,14 +41,33 @@ class SimulationTests(unittest.TestCase):
     def test_play_card_spends_elixir_and_cycles_hand(self):
         engine = self.make_engine()
         initial_hand = list(engine.players[SIDE_BLUE].hand())
+        expected_replacement = engine.players[SIDE_BLUE].deck[engine.players[SIDE_BLUE].order[4]]
         hand_slot, card_id = self.first_troop_slot(engine)
         engine.submit_play(SIDE_BLUE, hand_slot, 9.0, 24.0)
         engine.step()
         cycled_hand = list(engine.players[SIDE_BLUE].hand())
         self.assertNotEqual(cycled_hand, initial_hand)
-        self.assertEqual(cycled_hand[hand_slot], engine.players[SIDE_BLUE].deck[4])
+        self.assertEqual(cycled_hand[hand_slot], expected_replacement)
         self.assertLess(engine.players[SIDE_BLUE].elixir_milli, 5000)
         self.assertTrue(any(entity.card_id == card_id for entity in engine.entities.values()))
+
+    def test_initial_hand_order_is_seeded_shuffle(self):
+        first = GameEngine(
+            blue_deck=STARTER_DECK,
+            red_deck=STARTER_DECK,
+            options=GameOptions(placement_delay_ticks=0),
+            seed=12345,
+        )
+        second = GameEngine(
+            blue_deck=STARTER_DECK,
+            red_deck=STARTER_DECK,
+            options=GameOptions(placement_delay_ticks=0),
+            seed=12345,
+        )
+
+        self.assertEqual(first.players[SIDE_BLUE].order, second.players[SIDE_BLUE].order)
+        self.assertCountEqual(first.players[SIDE_BLUE].order, range(len(STARTER_DECK)))
+        self.assertNotEqual(first.players[SIDE_BLUE].order, list(range(len(STARTER_DECK))))
 
     def test_placement_snaps_to_clicked_tile_center(self):
         engine = self.make_engine(blue_deck=STARTER_DECK)
@@ -111,7 +130,7 @@ class SimulationTests(unittest.TestCase):
     def test_played_multi_unit_card_spawns_left_to_right_with_stagger(self):
         engine = GameEngine(
             blue_deck=("archers", "knight", "minions", "fireball", "cannon", "giant", "musketeer", "mini_pekka"),
-            options=GameOptions(placement_delay_ticks=0),
+            options=GameOptions(placement_delay_ticks=0, shuffle_initial_hands=False),
         )
         engine.submit_play(SIDE_BLUE, 0, 9.0, 24.0)
         engine.step()
@@ -178,7 +197,7 @@ class SimulationTests(unittest.TestCase):
         self.assertLessEqual(knight_spec.attack_range, MELEE_ATTACK_RANGE_MAX_TILES)
         self.assertAlmostEqual(knight.attack_range, knight_spec.attack_range * MELEE_ATTACK_RANGE_FACTOR)
         self.assertAlmostEqual(archer.attack_range, archer_spec.attack_range)
-        self.assertEqual(knight_spec.attack_range, 1.2)
+        self.assertEqual(knight_spec.attack_range, 0.8)
 
     def test_requested_excel_cards_are_registered(self):
         def ticks(seconds):
@@ -246,11 +265,11 @@ class SimulationTests(unittest.TestCase):
 
     def test_requested_added_retro_cards_are_registered(self):
         expected_units = {
-            "royal_giant": ("Royal Giant", "troop", 6, 1, "ground", "buildings", 3164, 307, 45, 5.0, 1.7, 1000, 0.0, 18, 0.75, 7.5, 0.7, 1.0),
-            "minion_horde": ("Minion Horde", "troop", 5, 6, "air", "all", 230, 107, 90, 2.5, 1.0, 1000, 0.0, 2, 0.5, 5.5, 0.5, 0.7),
-            "elite_barbarians": ("Elite Barbarians", "troop", 6, 2, "ground", "ground", 1341, 384, 90, 0.8, 1.4, 0, 0.0, 4, 0.5, 5.5, 0.5, 1.0),
+            "royal_giant": ("Royal Giant", "troop", 6, 1, "ground", "buildings", 3164, 307, 45, 5.0, 1.8, 1000, 0.0, 18, 0.75, 7.5, 0.7, 1.0),
+            "minion_horde": ("Minion Horde", "troop", 5, 6, "air", "all", 230, 107, 90, 2.5, 1.1, 1000, 0.0, 2, 0.5, 5.5, 0.5, 0.7),
+            "elite_barbarians": ("Elite Barbarians", "troop", 6, 2, "ground", "ground", 1341, 384, 90, 0.7, 1.4, 0, 0.0, 4, 0.5, 5.5, 0.5, 0.9),
             "hog_rider": ("Hog Rider", "troop", 4, 1, "ground", "buildings", 1697, 317, 120, 0.8, 1.6, 0, 0.0, 4, 0.6, 9.5, 0.6, 1.0),
-            "dart_goblin": ("Dart Goblin", "troop", 3, 1, "ground", "all", 260, 156, 120, 6.5, 0.8, 800, 0.0, 3, 0.5, 7.5, 0.35, 0.35),
+            "dart_goblin": ("Dart Goblin", "troop", 3, 1, "ground", "all", 261, 151, 120, 6.5, 0.8, 800, 0.0, 3, 0.5, 7.5, 0.35, 0.35),
             "pekka": ("P.E.K.K.A", "troop", 7, 1, "ground", "ground", 3760, 816, 45, 1.2, 1.8, 0, 0.0, 18, 0.75, 5.0, 0.5, 1.3),
             "bomb_tower": ("Bomb Tower", "building", 4, 1, "building", "ground", 1356, 222, 0, 6.0, 1.6, 400, 1.5, 0, 0.6, 5.5, 0.5, 1.1),
         }

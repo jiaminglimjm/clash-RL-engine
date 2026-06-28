@@ -20,6 +20,7 @@ const deckSlotsEl = document.getElementById("deckSlots");
 const deckActionsEl = document.getElementById("deckActions");
 const readyBtn = document.getElementById("readyBtn");
 const newLobbyBtn = document.getElementById("newLobbyBtn");
+const readyStatusEl = document.getElementById("readyStatus");
 const cardCatalogEl = document.getElementById("cardCatalog");
 const historyListEl = document.getElementById("historyList");
 const netStatusEl = document.getElementById("netStatus");
@@ -51,6 +52,8 @@ let selectedCatalogCard = null;
 let deckSaveTimer = null;
 let lastHandKey = "";
 let lastDeckRenderKey = "";
+let lastHistoryKey = "";
+let lastPhase = null;
 let lastRttMs = null;
 let lastError = "";
 let lastErrorAt = 0;
@@ -347,10 +350,12 @@ function drawEntity(entity) {
 
   const hpRatio = Math.max(0, entity.hp / entity.maxHp);
   const barW = Math.max(22, radius * 2.2);
+  const barH = entity.kind === "tower" ? 8 : 4;
+  const barY = healthBarY(entity, p, radius, barH);
   ctx.fillStyle = "rgba(0,0,0,0.35)";
-  ctx.fillRect(p.x - barW / 2, p.y - radius - 9, barW, 4);
-  ctx.fillStyle = entity.side === "blue" ? "#78d880" : "#ef817a";
-  ctx.fillRect(p.x - barW / 2, p.y - radius - 9, barW * hpRatio, 4);
+  ctx.fillRect(p.x - barW / 2, barY, barW, barH);
+  ctx.fillStyle = entity.side === "blue" ? "#4d91ff" : "#ef817a";
+  ctx.fillRect(p.x - barW / 2, barY, barW * hpRatio, barH);
 
   drawFacingArrow(entity, p, radius);
 
@@ -361,11 +366,27 @@ function drawEntity(entity) {
   ctx.strokeStyle = "rgba(255,255,255,0.88)";
   ctx.fillStyle = "#102010";
   const label = entity.kind === "tower" ? String(entity.hp) : entity.label;
-  const labelY = entity.kind === "tower" && entity.side === "red"
-    ? p.y - radius - 18
-    : p.y + radius + 10;
+  const labelY = labelYForEntity(entity, p, radius, barY, barH);
   ctx.strokeText(label, p.x, labelY);
   ctx.fillText(label, p.x, labelY);
+}
+
+function healthBarY(entity, p, radius, barH) {
+  if (entity.kind !== "tower") return p.y - radius - barH - 5;
+  if (towerInfoBelow(entity)) return p.y + radius + 6;
+  return p.y - radius - barH - 6;
+}
+
+function labelYForEntity(entity, p, radius, barY, barH) {
+  if (entity.kind !== "tower") return p.y + radius + 10;
+  return towerInfoBelow(entity) ? barY + barH + 9 : barY - 7;
+}
+
+function towerInfoBelow(entity) {
+  if (entity.kind !== "tower") return false;
+  const side = viewerSide();
+  if (side) return entity.side === side;
+  return entity.side === "blue";
 }
 
 function drawFacingArrow(entity, p, radius) {
@@ -614,13 +635,17 @@ function renderDeckEditor() {
   const side = viewerSide();
   const phase = state.remote.phase;
   deckPanelEl.hidden = !side || phase === "running";
-  if (!side || phase === "running") return;
+  if (!side || phase === "running") {
+    readyStatusEl.textContent = "";
+    return;
+  }
   deckPanelEl.classList.toggle("ended-only", phase === "ended");
   deckActionsEl.classList.toggle("lobby-ready", phase === "lobby");
   deckActionsEl.classList.toggle("ended-actions", phase === "ended");
 
   syncLocalDeck();
   const player = state.remote.players[side];
+  renderReadyStatus(side, phase, player);
   const canEdit = phase !== "running";
   const deckKey = [
     side,
@@ -685,6 +710,17 @@ function renderDeckEditor() {
   }
 }
 
+function renderReadyStatus(side, phase, player) {
+  if (phase !== "lobby" || !player.ready) {
+    readyStatusEl.textContent = "";
+    return;
+  }
+  const opponentSide = side === "blue" ? "red" : "blue";
+  const opponent = state.remote.players[opponentSide];
+  const waitingFor = opponent && opponent.connected ? opponent.name : "opponent";
+  readyStatusEl.textContent = `waiting for ${waitingFor}...`;
+}
+
 function selectCatalogCard(cardId) {
   if (!viewerSide() || state.remote.phase === "running") return;
   selectedCatalogCard = selectedCatalogCard === cardId ? null : cardId;
@@ -732,6 +768,9 @@ function syncLocalDeck() {
 
 function renderHistory() {
   const records = state.remote.history || [];
+  const historyKey = JSON.stringify(records.map(historyRecordKey));
+  if (historyKey === lastHistoryKey) return;
+  lastHistoryKey = historyKey;
   historyListEl.innerHTML = "";
   if (!records.length) {
     const empty = document.createElement("div");
@@ -745,20 +784,81 @@ function renderHistory() {
     item.className = "history-item";
     const title = document.createElement("div");
     title.className = "history-result";
-    const winner = record.outcome.winner ? capitalize(record.outcome.winner) : "Draw";
-    title.innerHTML = `<span>${winner}</span><span>${record.outcome.crowns.blue}-${record.outcome.crowns.red}</span>`;
+    const winner = historyWinnerLabel(record);
+    const crowns = record.outcome && record.outcome.crowns ? record.outcome.crowns : { blue: 0, red: 0 };
+    const winnerEl = document.createElement("span");
+    winnerEl.textContent = winner;
+    const scoreEl = document.createElement("span");
+    scoreEl.textContent = `${crowns.blue}-${crowns.red}`;
+    title.appendChild(winnerEl);
+    title.appendChild(scoreEl);
     const meta = document.createElement("div");
     meta.className = "history-meta";
     const when = new Date(record.endedAt).toLocaleString();
     meta.textContent = `${when}  ${formatDuration(record.durationSeconds)}`;
-    const names = document.createElement("div");
-    names.className = "history-meta";
-    names.textContent = `${record.players.blue} vs ${record.players.red}`;
     item.appendChild(title);
     item.appendChild(meta);
-    item.appendChild(names);
+    item.appendChild(makeHistoryDeckSummary(record));
     historyListEl.appendChild(item);
   }
+}
+
+function historyRecordKey(record) {
+  const crowns = record.outcome && record.outcome.crowns ? record.outcome.crowns : {};
+  return {
+    matchId: record.matchId,
+    endedAt: record.endedAt,
+    winner: record.outcome ? record.outcome.winner : null,
+    crowns: { blue: crowns.blue, red: crowns.red },
+    players: record.players || {},
+    decks: record.decks || {}
+  };
+}
+
+function historyWinnerLabel(record) {
+  const winnerSide = record.outcome ? record.outcome.winner : null;
+  if (!winnerSide) return "Draw";
+  const name = record.players && record.players[winnerSide] ? record.players[winnerSide] : capitalize(winnerSide);
+  return `${name} Wins!`;
+}
+
+function makeHistoryDeckSummary(record) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "history-decks";
+  for (const side of ["blue", "red"]) {
+    const row = document.createElement("div");
+    row.className = `history-deck-row ${side}-history`;
+    const label = document.createElement("div");
+    label.className = "history-player";
+    label.textContent = record.players && record.players[side] ? record.players[side] : capitalize(side);
+    const cards = document.createElement("div");
+    cards.className = "history-deck-cards";
+    for (const cardId of (record.decks && record.decks[side] ? record.decks[side] : [])) {
+      cards.appendChild(makeHistoryDeckCard(cardId));
+    }
+    row.appendChild(label);
+    row.appendChild(cards);
+    wrapper.appendChild(row);
+  }
+  return wrapper;
+}
+
+function makeHistoryDeckCard(cardId) {
+  const meta = state.cards[cardId];
+  const card = document.createElement("span");
+  card.className = "history-card";
+  card.title = meta ? meta.name : cardId;
+  card.style.background = `linear-gradient(160deg, #f7f7f0, ${meta && meta.secondaryColor ? meta.secondaryColor : "#dde6d8"})`;
+  const img = makeArtImage(cardId);
+  if (img) card.appendChild(img);
+  const tint = document.createElement("span");
+  tint.className = "card-tint";
+  card.appendChild(tint);
+  const name = document.createElement("span");
+  name.className = "history-card-name";
+  name.textContent = meta ? meta.name : cardId;
+  card.appendChild(name);
+  return card;
 }
 
 function renderNet() {
@@ -883,11 +983,25 @@ async function pollLoop() {
 }
 
 function receiveState(nextState) {
+  const previousPhase = lastPhase;
   previousState = state;
   state = nextState;
+  lastPhase = state && state.remote ? state.remote.phase : null;
   lastStateAt = performance.now();
   if (selectedSlot !== null && (selectedSlot < 0 || selectedSlot > 3)) selectedSlot = null;
   renderPanel();
+  if (previousPhase && previousPhase !== "running" && lastPhase === "running") {
+    scrollToArena();
+  }
+}
+
+function scrollToArena() {
+  window.requestAnimationFrame(() => {
+    const playArea = document.querySelector(".play-area");
+    if (playArea) {
+      playArea.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
 }
 
 async function postJson(url, payload) {

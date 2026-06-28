@@ -289,10 +289,11 @@ function drawEntity(entity) {
 
   const hpRatio = Math.max(0, entity.hp / entity.maxHp);
   const barW = Math.max(22, radius * 2.2);
+  const barH = entity.kind === "tower" ? 8 : 4;
   ctx.fillStyle = "rgba(0,0,0,0.35)";
-  ctx.fillRect(p.x - barW / 2, p.y - radius - 9, barW, 4);
-  ctx.fillStyle = entity.side === "blue" ? "#78d880" : "#ef817a";
-  ctx.fillRect(p.x - barW / 2, p.y - radius - 9, barW * hpRatio, 4);
+  ctx.fillRect(p.x - barW / 2, p.y - radius - barH - 5, barW, barH);
+  ctx.fillStyle = entity.side === "blue" ? "#4d91ff" : "#ef817a";
+  ctx.fillRect(p.x - barW / 2, p.y - radius - barH - 5, barW * hpRatio, barH);
 
   drawFacingArrow(entity, p, radius);
 

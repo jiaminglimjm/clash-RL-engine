@@ -29,7 +29,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #edf4ea;
+  background: #f5f7fb;
 }
 
 button:disabled {
@@ -327,9 +327,19 @@ button:disabled {
   justify-content: center;
 }
 
+.ready-status {
+  min-height: 18px;
+  margin-top: 7px;
+  color: #536151;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .deck-panel.ended-only .panel-title,
 .deck-panel.ended-only .deck-slots,
 .deck-panel.ended-only .catalog,
+.deck-panel.ended-only .catalog-title,
 .deck-panel.ended-only .hotkey-tip {
   display: none;
 }
@@ -354,18 +364,22 @@ button:disabled {
   color: #b83028;
 }
 
-.blue-action.active-side {
+.blue-action.active-side,
+.blue-action.active-side:hover:not(:disabled) {
   border-color: #2867d8;
   background: #2867d8;
   color: #ffffff;
   font-weight: 900;
+  box-shadow: 0 0 0 3px rgba(40, 103, 216, 0.26);
 }
 
-.red-action.active-side {
+.red-action.active-side,
+.red-action.active-side:hover:not(:disabled) {
   border-color: #d53a34;
   background: #d53a34;
   color: #ffffff;
   font-weight: 900;
+  box-shadow: 0 0 0 3px rgba(213, 58, 52, 0.26);
 }
 
 .seat-list {
@@ -572,6 +586,13 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(242, 201, 76, 0.24);
 }
 
+.catalog-title {
+  margin-top: 10px;
+  color: #2b372a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .hotkey-tip {
   display: none;
   margin: 2px 0 9px;
@@ -600,6 +621,62 @@ button:disabled {
   justify-content: space-between;
   gap: 8px;
   font-weight: 800;
+}
+
+.history-decks {
+  display: grid;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.history-deck-row {
+  display: grid;
+  grid-template-columns: minmax(58px, 84px) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.history-player {
+  min-width: 0;
+  overflow: hidden;
+  color: #536151;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-deck-cards {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
+}
+
+.history-card {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 4;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #c1cbbd;
+  border-radius: 4px;
+}
+
+.history-card-name {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  left: 2px;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 6px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+  white-space: nowrap;
 }
 
 .net-panel {
@@ -714,7 +791,8 @@ button:disabled {
   }
 
   .catalog {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .deck-slots {
