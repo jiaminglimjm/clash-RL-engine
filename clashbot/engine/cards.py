@@ -134,7 +134,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 hp=1766,
                 damage=202,
                 speed_tiles_per_minute=60,
-                attack_range=1.2,
+                attack_range=0.8,
                 sight_range=5.5,
                 hit_speed_ticks=_ticks(1.2),
                 deploy_ticks=_ticks(1.0),
@@ -224,7 +224,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 speed_tiles_per_minute=90,
                 attack_range=2.5,
                 sight_range=5.5,
-                hit_speed_ticks=_ticks(1.0),
+                hit_speed_ticks=_ticks(1.1),
                 deploy_ticks=_ticks(1.0),
                 mass=2,
                 radius=0.5,
@@ -234,13 +234,13 @@ CARD_SPECS: Dict[str, CardSpec] = {
             ),
         ),
         formation=(
-            Vec2(-0.8, -0.55),
-            Vec2(0.0, -0.65),
-            Vec2(0.8, -0.55),
-            Vec2(-0.8, 0.45),
-            Vec2(0.0, 0.55),
-            Vec2(0.8, 0.45),
-        ),
+            Vec2(-0.87, -0.60),  # 210°
+            Vec2( 0.00, -1.00),  # 270°
+            Vec2( 0.87, -0.60),  # 330°
+            Vec2(-0.86,  0.60),  # 150°
+            Vec2( 0.00,  1.00),  # 90°
+            Vec2( 0.86,  0.60),  # 30°
+        )
     ),
     "spear_goblins": CardSpec(
         card_id="spear_goblins",
@@ -547,14 +547,14 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 hp=1341,
                 damage=384,
                 speed_tiles_per_minute=90,
-                attack_range=0.8,
+                attack_range=0.7,
                 sight_range=5.5,
                 hit_speed_ticks=_ticks(1.4),
                 deploy_ticks=_ticks(1.0),
                 mass=4,
                 radius=0.5,
                 first_attack_ticks=_ticks(0.5),
-                load_time_ticks=_ticks(1.0),
+                load_time_ticks=_ticks(0.9),
             ),
         ),
         formation=(Vec2(-0.45, 0.0), Vec2(0.45, 0.0)),
@@ -862,7 +862,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 speed_tiles_per_minute=45,
                 attack_range=5.0,
                 sight_range=7.5,
-                hit_speed_ticks=_ticks(1.7),
+                hit_speed_ticks=_ticks(1.8),
                 deploy_ticks=_ticks(1.0),
                 mass=18,
                 radius=0.75,
@@ -895,8 +895,8 @@ CARD_SPECS: Dict[str, CardSpec] = {
                 deploy_ticks=_ticks(1.0),
                 mass=4,
                 radius=0.6,
-                first_attack_ticks=_ticks(0.5),
-                load_time_ticks=_ticks(1.1),
+                first_attack_ticks=_ticks(0.6),
+                load_time_ticks=_ticks(1.0),
                 mechanics=("river_jump",),
             ),
         ),
@@ -1151,26 +1151,26 @@ CARD_SPECS: Dict[str, CardSpec] = {
     ),
 }
 
-# DEFAULT_DECK = (
-#     "knight",
-#     "musketeer",
-#     "minions",
-#     "giant",
-#     "cannon",
-#     "fireball",
-#     "archers",
-#     "mini_pekka",
-# )
 DEFAULT_DECK = (
-    "hog_rider",
-    "elite_barbarians",
-    "royal_giant",
-    "minion_horde",
-    "goblin_gang",
-    "witch",
-    "goblins",
-    "bats",
+    "knight",
+    "musketeer",
+    "minions",
+    "giant",
+    "cannon",
+    "fireball",
+    "archers",
+    "mini_pekka",
 )
+# DEFAULT_DECK = (
+#     "hog_rider",
+#     "elite_barbarians",
+#     "royal_giant",
+#     "minion_horde",
+#     "goblin_gang",
+#     "witch",
+#     "goblins",
+#     "bats",
+# )
 
 TOWER_SPECS: Dict[str, UnitSpec] = {
     "king": UnitSpec(

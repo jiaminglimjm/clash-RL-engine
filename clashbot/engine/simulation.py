@@ -399,6 +399,7 @@ class GameEngine:
             "maxHp": entity.max_hp,
             "radius": entity.radius,
             "footprint": entity.footprint,
+            "attackRange": entity.attack_range,
             "hitSpeedTicks": entity.hit_speed_ticks,
             "firstAttackTicks": entity.first_attack_ticks,
             "loadTimeTicks": entity.load_time_ticks,

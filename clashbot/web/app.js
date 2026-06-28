@@ -111,6 +111,9 @@ function drawArena() {
   for (const projectile of state.projectiles) {
     drawProjectile(projectile);
   }
+
+  drawHoveredRanges();
+
   for (const entity of state.entities) {
     drawEntity(entity);
   }
@@ -207,6 +210,49 @@ function drawProjectile(projectile) {
   ctx.strokeStyle = "rgba(255,255,255,0.9)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
+}
+
+function hoveredEntity() {
+  if (!state || !hoverWorld) return null;
+  const r = arenaRect();
+  for (let index = state.entities.length - 1; index >= 0; index -= 1) {
+    const entity = state.entities[index];
+    const dx = hoverWorld.x - entity.x;
+    const dy = hoverWorld.y - entity.y;
+    const hoverRadius = Math.max(entity.radius || 0, entity.footprint ? entity.footprint / 2 : 0, 8 / r.tile);
+    if (Math.hypot(dx, dy) <= hoverRadius) return entity;
+  }
+  return null;
+}
+
+function drawHoveredRanges() {
+  const entity = hoveredEntity();
+  if (!entity) return;
+  const r = arenaRect();
+  const p = worldToScreen(entity.x, entity.y);
+
+  drawRangeCircle(p, entity.sightRange, r.tile, {
+    alpha: 0.72,
+    dash: [4, 5],
+    width: 1
+  });
+  drawRangeCircle(p, entity.attackRange, r.tile, {
+    alpha: 0.9,
+    dash: [],
+    width: 1.25
+  });
+}
+
+function drawRangeCircle(center, rangeTiles, tileSize, style) {
+  if (!Number.isFinite(rangeTiles) || rangeTiles <= 0) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, rangeTiles * tileSize, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,255,255,${style.alpha})`;
+  ctx.lineWidth = style.width;
+  ctx.setLineDash(style.dash);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawEntity(entity) {
