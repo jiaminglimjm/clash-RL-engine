@@ -309,6 +309,8 @@ class GameEngine:
                     "ttl": projectile.ttl_ticks,
                     "delay": projectile.delay_ticks,
                     "done": projectile.effect_done,
+                    "strike": projectile.strike_index,
+                    "targetIds": list(projectile.target_ids),
                     "mechanics": list(projectile.mechanics),
                     "visualTargets": [
                         [round(point.x, 5), round(point.y, 5)]
@@ -473,6 +475,7 @@ class GameEngine:
             "mechanics": list(projectile.mechanics),
             "delayTicks": projectile.delay_ticks,
             "effectDone": projectile.effect_done,
+            "strikeIndex": projectile.strike_index,
             "visualTargets": [{"x": point.x, "y": point.y} for point in projectile.visual_targets],
         }
 
@@ -818,7 +821,7 @@ class GameEngine:
             target_pos=target,
             splash_radius=spell.radius,
             knockback_tiles=spell.knockback_tiles,
-            radius=0.22,
+            radius=0.42 if "spawn_on_arrival" in spell.mechanics else 0.22,
             ttl_ticks=180,
             mechanics=spell.mechanics,
             spawn_units=card.units,
@@ -830,6 +833,7 @@ class GameEngine:
     def _queue_lightning(self, side: str, card: CardSpec, target: Vec2) -> None:
         assert card.spell is not None
         delay_ticks = max(1, int(round(0.5 * TICKS_PER_SECOND)))
+        linger_ticks = max(1, int(round(0.28 * TICKS_PER_SECOND)))
         projectile = Projectile(
             projectile_id=self._allocate_projectile_id(),
             side=side,
@@ -842,7 +846,7 @@ class GameEngine:
             target_pos=target,
             splash_radius=card.spell.radius,
             radius=card.spell.radius,
-            ttl_ticks=delay_ticks + max(1, int(round(0.22 * TICKS_PER_SECOND))),
+            ttl_ticks=delay_ticks * 3 + linger_ticks,
             mechanics=card.spell.mechanics,
             delay_ticks=delay_ticks,
             secondary_color=card.secondary_color,
@@ -1246,10 +1250,29 @@ class GameEngine:
         projectile.delay_ticks -= 1
         if projectile.delay_ticks > 0:
             return
-        hits = self._resolve_lightning(projectile)
-        projectile.visual_targets = tuple(entity.pos for entity in hits)
-        projectile.effect_done = True
-        projectile.ttl_ticks = max(projectile.ttl_ticks, max(1, int(round(0.22 * TICKS_PER_SECOND))))
+        if not projectile.target_ids:
+            targets = self._lightning_targets(projectile)
+            projectile.target_ids = tuple(entity.entity_id for entity in targets)
+            if not projectile.target_ids:
+                projectile.effect_done = True
+                self._log("%s struck 0 targets at %.1f,%.1f" % (
+                    projectile.label,
+                    projectile.pos.x,
+                    projectile.pos.y,
+                ))
+                return
+
+        target = self.entities.get(projectile.target_ids[projectile.strike_index])
+        if target is not None and target.alive:
+            self._strike_lightning_target(projectile, target)
+            projectile.visual_targets = projectile.visual_targets + (target.pos,)
+        projectile.strike_index += 1
+
+        if projectile.strike_index >= len(projectile.target_ids):
+            projectile.effect_done = True
+            projectile.ttl_ticks = max(projectile.ttl_ticks, max(1, int(round(0.28 * TICKS_PER_SECOND))))
+            return
+        projectile.delay_ticks = max(1, int(round(0.5 * TICKS_PER_SECOND)))
 
     def _spawn_spell_units(self, projectile: Projectile) -> None:
         if projectile.target_pos is None:
@@ -1307,16 +1330,26 @@ class GameEngine:
         )
         self._resolve_area_damage(projectile)
 
-    def _resolve_lightning(self, projectile: Projectile) -> List[Entity]:
+    def _lightning_targets(self, projectile: Projectile) -> List[Entity]:
         candidates = self._targets_in_radius(projectile.side, projectile.pos, projectile.splash_radius)
-        hits = sorted(candidates, key=lambda entity: (-entity.hp, entity.entity_id))[:3]
-        for entity in hits:
-            self._damage_spell_target(projectile, entity)
-            entity.attack_cooldown_ticks = 0
-            entity.attack_windup_target_id = None
-            entity.target_locked = False
-        self._log("%s struck %d targets at %.1f,%.1f" % (projectile.label, len(hits), projectile.pos.x, projectile.pos.y))
-        return hits
+        return sorted(candidates, key=lambda entity: (-entity.hp, entity.entity_id))[:3]
+
+    def _strike_lightning_target(self, projectile: Projectile, entity: Entity) -> None:
+        self._damage_spell_target(projectile, entity)
+        entity.attack_cooldown_ticks = 0
+        entity.attack_windup_target_id = None
+        entity.target_locked = False
+        self._log(
+            "%s struck %s %d/%d at %.1f,%.1f"
+            % (
+                projectile.label,
+                entity.label,
+                projectile.strike_index + 1,
+                len(projectile.target_ids),
+                entity.pos.x,
+                entity.pos.y,
+            )
+        )
 
     def _targets_in_radius(self, source_side: str, center: Vec2, radius: float) -> List[Entity]:
         return [

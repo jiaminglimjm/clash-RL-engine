@@ -311,13 +311,25 @@ function drawProjectile(projectile) {
     drawLightningEffect(projectile, p, r);
     return;
   }
+  const isGoblinBarrel = projectile.cardId === "goblin_barrel";
+  const radius = isGoblinBarrel
+    ? Math.max(9, projectile.radius * r.tile * 1.35)
+    : Math.max(4, projectile.radius * r.tile);
   ctx.beginPath();
-  ctx.arc(p.x, p.y, Math.max(4, projectile.radius * r.tile), 0, Math.PI * 2);
-  ctx.fillStyle = projectile.cardId === "fireball" ? "#f47a23" : sideColor[projectile.side];
+  ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = isGoblinBarrel
+    ? "#34b653"
+    : projectile.cardId === "fireball" ? "#f47a23" : sideColor[projectile.side];
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = isGoblinBarrel ? "#0f6c32" : "rgba(255,255,255,0.9)";
+  ctx.lineWidth = isGoblinBarrel ? 2.5 : 1.5;
   ctx.stroke();
+  if (isGoblinBarrel) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, radius * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = "#9df0a5";
+    ctx.fill();
+  }
 }
 
 function drawLightningEffect(projectile, center, r) {
@@ -331,23 +343,42 @@ function drawLightningEffect(projectile, center, r) {
   ctx.stroke();
   ctx.restore();
 
-  if (!projectile.effectDone) return;
   const targets = projectile.visualTargets || [];
-  for (const target of targets) {
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
     const end = worldToScreen(target.x, target.y);
+    const latest = index === targets.length - 1 && !projectile.effectDone;
+    const alpha = latest ? 1 : 0.72;
     ctx.save();
-    ctx.strokeStyle = "#eaf7ff";
-    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.shadowColor = "rgba(80, 205, 255, 0.95)";
+    ctx.shadowBlur = latest ? 14 : 8;
+    ctx.strokeStyle = `rgba(63, 181, 255, ${0.55 * alpha})`;
+    ctx.lineWidth = latest ? 8 : 6;
     ctx.beginPath();
-    ctx.moveTo(end.x, end.y - r.tile * 2.2);
+    ctx.moveTo(end.x, end.y - r.tile * 2.8);
+    ctx.lineTo(end.x - 7, end.y - r.tile * 1.65);
+    ctx.lineTo(end.x + 5, end.y - r.tile * 0.85);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#eaf7ff";
+    ctx.lineWidth = latest ? 4 : 3;
+    ctx.shadowBlur = latest ? 10 : 5;
+    ctx.beginPath();
+    ctx.moveTo(end.x, end.y - r.tile * 2.8);
+    ctx.lineTo(end.x - 7, end.y - r.tile * 1.65);
+    ctx.lineTo(end.x + 5, end.y - r.tile * 0.85);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
     ctx.strokeStyle = "rgba(94, 197, 255, 0.9)";
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
     ctx.beginPath();
-    ctx.moveTo(end.x - 4, end.y - r.tile * 1.2);
-    ctx.lineTo(end.x + 3, end.y - r.tile * 0.55);
-    ctx.lineTo(end.x - 2, end.y);
+    ctx.moveTo(end.x + 5, end.y - r.tile * 2.0);
+    ctx.lineTo(end.x - 3, end.y - r.tile * 1.35);
+    ctx.lineTo(end.x + 4, end.y - r.tile * 0.7);
     ctx.stroke();
     ctx.restore();
   }

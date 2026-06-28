@@ -395,6 +395,8 @@ class SimulationTests(unittest.TestCase):
     def test_goblin_barrel_spawns_goblins_on_arrival(self):
         engine = self.make_engine()
         engine._cast_spell(SIDE_BLUE, CARD_SPECS["goblin_barrel"], Vec2(9.5, 10.5))
+        projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "goblin_barrel")
+        self.assertGreaterEqual(projectile.radius, 0.4)
         engine.step(95)
 
         goblins = [
@@ -414,16 +416,36 @@ class SimulationTests(unittest.TestCase):
             engine._spawn_card_units(SIDE_RED, CARD_SPECS[card_id], pos)
         entities = {entity.unit_id: entity for entity in engine.entities.values() if entity.side == SIDE_RED}
         giant_hp = entities["giant"].hp
+        knight_hp = entities["knight"].hp
+        musketeer_hp = entities["musketeer"].hp
         skeleton_hp = next(entity for entity in engine.entities.values() if entity.unit_id == "skeleton").hp
 
         engine._cast_spell(SIDE_BLUE, CARD_SPECS["lightning"], Vec2(9.5, 10.5))
-        engine.step(self.ticks(0.5) - 1)
+        strike_interval = self.ticks(0.5)
+        engine.step(strike_interval - 1)
         self.assertEqual(entities["giant"].hp, giant_hp)
         projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "lightning")
         self.assertFalse(projectile.effect_done)
 
-        engine.step(2)
+        engine.step()
         self.assertLess(entities["giant"].hp, giant_hp)
+        self.assertEqual(entities["knight"].hp, knight_hp)
+        self.assertEqual(entities["musketeer"].hp, musketeer_hp)
+        projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "lightning")
+        self.assertFalse(projectile.effect_done)
+        self.assertEqual(len(projectile.visual_targets), 1)
+
+        engine.step(strike_interval - 1)
+        self.assertEqual(entities["knight"].hp, knight_hp)
+        engine.step()
+        self.assertLess(entities["knight"].hp, knight_hp)
+        self.assertEqual(entities["musketeer"].hp, musketeer_hp)
+        projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "lightning")
+        self.assertFalse(projectile.effect_done)
+        self.assertEqual(len(projectile.visual_targets), 2)
+
+        engine.step(strike_interval)
+        self.assertLess(entities["musketeer"].hp, musketeer_hp)
         self.assertEqual(next(entity for entity in engine.entities.values() if entity.unit_id == "skeleton").hp, skeleton_hp)
         projectile = next(projectile for projectile in engine.projectiles.values() if projectile.source_card_id == "lightning")
         self.assertTrue(projectile.effect_done)

@@ -924,7 +924,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
         source_name="Rocket",
         kind="spell",
         elixir=6,
-        secondary_color="#b24a36",
+        secondary_color="#8f9399",
         spell=SpellSpec(
             spell_id="rocket",
             damage=1484,
@@ -941,7 +941,7 @@ CARD_SPECS: Dict[str, CardSpec] = {
         source_name="Goblin Barrel",
         kind="spell",
         elixir=3,
-        secondary_color="#5c8a32",
+        secondary_color="#2fa858",
         units=(SPAWNED_GOBLIN,),
         formation=(Vec2(0.0, -0.45), Vec2(-0.55, 0.45), Vec2(0.55, 0.45)),
         spell=SpellSpec(
@@ -1628,26 +1628,26 @@ CARD_SPECS: Dict[str, CardSpec] = {
 #     "archers",
 #     "mini_pekka",
 # )
-DEFAULT_DECK = (
-    "hog_rider",
-    "elite_barbarians",
-    "royal_giant",
-    "witch",
-    "lightning",
-    "goblin_gang",
-    "goblins",
-    "bats",
-)
 # DEFAULT_DECK = (
-#     "goblin_barrel",
-#     "lava_hound",
+#     "hog_rider",
+#     "elite_barbarians",
+#     "royal_giant",
+#     "witch",
 #     "lightning",
-#     "skeleton_army",
-#     "balloon",
-#     "arrows",
-#     "baby_dragon",
-#     "golem",
+#     "goblin_gang",
+#     "goblins",
+#     "bats",
 # )
+DEFAULT_DECK = (
+    "goblin_barrel",
+    "lava_hound",
+    "lightning",
+    "skeleton_army",
+    "balloon",
+    "arrows",
+    "baby_dragon",
+    "golem",
+)
 
 
 TOWER_SPECS: Dict[str, UnitSpec] = {

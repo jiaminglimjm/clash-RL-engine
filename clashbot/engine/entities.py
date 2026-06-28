@@ -110,6 +110,8 @@ class Projectile:
     mechanics: Tuple[str, ...] = ()
     delay_ticks: int = 0
     effect_done: bool = False
+    strike_index: int = 0
+    target_ids: Tuple[int, ...] = ()
     visual_targets: Tuple[Vec2, ...] = ()
     spawn_units: Tuple["UnitSpec", ...] = ()
     spawn_formation: Tuple[Vec2, ...] = (Vec2(0.0, 0.0),)
