@@ -933,7 +933,8 @@ function renderNet() {
   const revision = state.remote.revision;
   const delay = state.net.placementDelayTicks;
   const rtt = lastRttMs === null ? "" : `  poll ${lastRttMs}ms`;
-  netStatusEl.textContent = `rev ${revision}  place ${delay} ticks${rtt}`;
+  const instance = state.remote.serverInstanceId ? `  node ${state.remote.serverInstanceId.slice(0, 8)}` : "";
+  netStatusEl.textContent = `rev ${revision}  place ${delay} ticks${rtt}${instance}`;
   hashStatusEl.textContent = state.stateHash ? state.stateHash.slice(0, 16) : "";
 }
 

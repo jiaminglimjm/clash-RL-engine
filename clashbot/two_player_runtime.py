@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import secrets
 import threading
@@ -65,6 +66,8 @@ class TwoPlayerRuntime:
         self.running = True
         self.history_error: Optional[str] = None
         self.history = self._load_history()
+        self.server_instance_id = os.environ.get("FLY_MACHINE_ID") or os.environ.get("HOSTNAME") or "local"
+        self.server_started_at_ms = int(time.time() * 1000)
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._started = False
 
@@ -341,6 +344,8 @@ class TwoPlayerRuntime:
             "matchId": self.match_id,
             "viewerSide": viewer_side,
             "serverTimeMs": int(time.time() * 1000),
+            "serverInstanceId": self.server_instance_id,
+            "serverStartedAtMs": self.server_started_at_ms,
             "tickRate": TICKS_PER_SECOND,
             "engineVersion": ENGINE_VERSION,
             "players": {
