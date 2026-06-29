@@ -1,0 +1,2 @@
+python3 tools/naked_bridge_report.py
+python3 -m clashbot.debug_server --host 0.0.0.0 --port 8000

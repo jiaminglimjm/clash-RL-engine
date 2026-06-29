@@ -1618,16 +1618,16 @@ CARD_SPECS: Dict[str, CardSpec] = {
     ),
 }
 
-# DEFAULT_DECK = (
-#     "knight",
-#     "musketeer",
-#     "minions",
-#     "giant",
-#     "cannon",
-#     "fireball",
-#     "archers",
-#     "mini_pekka",
-# )
+DEFAULT_DECK = (
+    "knight",
+    "musketeer",
+    "minions",
+    "giant",
+    "cannon",
+    "fireball",
+    "archers",
+    "mini_pekka",
+)
 # DEFAULT_DECK = (
 #     "hog_rider",
 #     "elite_barbarians",
@@ -1638,16 +1638,16 @@ CARD_SPECS: Dict[str, CardSpec] = {
 #     "goblins",
 #     "bats",
 # )
-DEFAULT_DECK = (
-    "goblin_barrel",
-    "lava_hound",
-    "lightning",
-    "skeleton_army",
-    "balloon",
-    "arrows",
-    "baby_dragon",
-    "golem",
-)
+# DEFAULT_DECK = (
+#     "goblin_barrel",
+#     "lava_hound",
+#     "lightning",
+#     "skeleton_army",
+#     "balloon",
+#     "arrows",
+#     "baby_dragon",
+#     "golem",
+# )
 
 
 TOWER_SPECS: Dict[str, UnitSpec] = {
