@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -243,7 +244,7 @@ def make_handler(runtime: DebugRuntime, two_runtime: TwoPlayerRuntime):
 def main(argv: Optional[list] = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     parser.add_argument("--two-history", default=str(DEFAULT_HISTORY_PATH))
     parser.add_argument("--two-placement-delay-ticks", type=int, default=3)
     parser.add_argument("--two-lockstep-delay-ticks", type=int, default=0)
